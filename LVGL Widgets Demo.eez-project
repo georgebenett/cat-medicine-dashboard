@@ -1770,6 +1770,7 @@
               },
               "timeline": [],
               "eventHandlers": [],
+              "identifier": "backlight_slider",
               "leftUnit": "px",
               "topUnit": "px",
               "widthUnit": "px",

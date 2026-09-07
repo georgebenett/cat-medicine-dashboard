@@ -484,7 +484,9 @@ void create_screen_input1_widgets_demo() {
             lv_roller_set_options(obj, "Option 1\nOption 2\nOption 3", LV_ROLLER_MODE_NORMAL);
         }
         {
+            // backlight_slider
             lv_obj_t *obj = lv_slider_create(parent_obj);
+            objects.backlight_slider = obj;
             lv_obj_set_pos(obj, 113, 405);
             lv_obj_set_size(obj, 150, 10);
             lv_slider_set_value(obj, 25, LV_ANIM_OFF);
@@ -887,7 +889,7 @@ extern void add_style(lv_obj_t *obj, int32_t styleIndex);
 extern void remove_style(lv_obj_t *obj, int32_t styleIndex);
 
 static const char *screen_names[] = { "basic_widgets_demo", "input1_widgets_demo", "input2_widgets_demo", "visualiser_widgets_demo" };
-static const char *object_names[] = { "basic_widgets_demo", "input1_widgets_demo", "input2_widgets_demo", "visualiser_widgets_demo", "obj0", "obj1", "obj2", "obj3", "obj4", "obj5", "obj6", "obj7", "obj8", "obj9", "obj10", "obj11", "obj12", "obj13", "obj14", "obj15", "obj16", "obj17", "obj18", "obj19", "obj20", "obj21", "obj22", "textarea1", "obj23", "obj24", "obj25", "obj26", "obj27", "obj28" };
+static const char *object_names[] = { "basic_widgets_demo", "input1_widgets_demo", "input2_widgets_demo", "visualiser_widgets_demo", "obj0", "obj1", "obj2", "obj3", "obj4", "obj5", "obj6", "obj7", "obj8", "obj9", "obj10", "obj11", "obj12", "obj13", "obj14", "obj15", "obj16", "obj17", "obj18", "obj19", "backlight_slider", "obj20", "obj21", "obj22", "textarea1", "obj23", "obj24", "obj25", "obj26", "obj27", "obj28" };
 static const char *style_names[] = { "inactive_tab", "tab_panel", "active_tab", "widget_name_label" };
 
 

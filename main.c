@@ -19,8 +19,10 @@
 #include <sys/time.h>
 #include <linux/fb.h>
 #include <linux/input.h>
+#include <glob.h>
 #include <lvgl/lvgl.h>
 #include "ui/ui.h"
+#include "ui/screens.h"
 
 #define FB_DEV     "/dev/fb0"
 
@@ -120,6 +122,57 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
     if (t_debug && pressed) fprintf(stderr, "touch raw=%d,%d -> %d,%d\n", raw_x, raw_y, x, y);
 }
 
+/* --- panel backlight -------------------------------------------------
+ * The Waveshare panel MCU exposes a standard sysfs backlight. Found by
+ * glob, not hardcoded: the i2c address shows up in the device name. */
+#define BL_MIN_PCT 5        /* never fully dark - you'd lose sight of the slider */
+
+static char bl_path[512];
+static int  bl_max;
+
+static void backlight_find(void)
+{
+    glob_t g;
+    if (glob("/sys/class/backlight/*/brightness", 0, NULL, &g) == 0 && g.gl_pathc > 0) {
+        snprintf(bl_path, sizeof bl_path, "%s", g.gl_pathv[0]);
+        char mp[512];
+        snprintf(mp, sizeof mp, "%s", g.gl_pathv[0]);
+        char *slash = strrchr(mp, '/');
+        if (slash) snprintf(slash, sizeof mp - (slash - mp), "/max_brightness");
+        FILE *f = fopen(mp, "r");
+        if (f) { if (fscanf(f, "%d", &bl_max) != 1) bl_max = 0; fclose(f); }
+        printf("backlight: %s (max %d)\n", bl_path, bl_max);
+    } else {
+        printf("backlight: none found\n");
+    }
+    globfree(&g);
+}
+
+static void backlight_set_pct(int pct)
+{
+    if (!bl_path[0] || bl_max <= 0) return;
+    if (pct < BL_MIN_PCT) pct = BL_MIN_PCT;
+    if (pct > 100) pct = 100;
+    FILE *f = fopen(bl_path, "w");
+    if (!f) { perror("backlight write"); return; }
+    fprintf(f, "%d\n", pct * bl_max / 100);
+    fclose(f);
+}
+
+static int backlight_get_pct(void)
+{
+    if (!bl_path[0] || bl_max <= 0) return 100;
+    int v = bl_max;
+    FILE *f = fopen(bl_path, "r");
+    if (f) { if (fscanf(f, "%d", &v) != 1) v = bl_max; fclose(f); }
+    return v * 100 / bl_max;
+}
+
+static void backlight_slider_cb(lv_event_t *e)
+{
+    backlight_set_pct((int)lv_slider_get_value(lv_event_get_target(e)));
+}
+
 static uint32_t millis(void)
 {
     struct timeval tv;
@@ -189,6 +242,16 @@ int main(void)
            (int)lv_disp_get_ver_res(NULL));
 
     ui_init();
+
+    /* Wire the EEZ slider to the backlight HERE, not in src/ui/: EEZ Studio
+     * regenerates screens.c and would overwrite anything added there. */
+    backlight_find();
+    if (objects.backlight_slider) {
+        lv_slider_set_value(objects.backlight_slider, backlight_get_pct(), LV_ANIM_OFF);
+        lv_obj_add_event_cb(objects.backlight_slider, backlight_slider_cb,
+                            LV_EVENT_VALUE_CHANGED, NULL);
+        printf("backlight slider wired (currently %d%%)\n", backlight_get_pct());
+    }
 
     /* Debug cursor on the system layer: shows where LVGL believes the
      * pointer is. Set TOUCH_CURSOR=0 to hide it once calibration is done. */
