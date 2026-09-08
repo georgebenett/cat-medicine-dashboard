@@ -1,0 +1,15 @@
+[Unit]
+Description=LVGL UI (EEZ) on the Waveshare 9" DSI panel
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/home/georges/lvgl_app/app
+Restart=always
+RestartSec=3
+# Never a tty: stdout on the panel console paints over the UI.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
