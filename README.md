@@ -86,6 +86,24 @@ to change it.
 `photos/` and `cat.png` are gitignored: they are personal and this repo
 has a public remote. Copy them over with scp instead.
 
+## Weather
+
+`weather.py` fetches from Open-Meteo (no API key) into `weather.txt`,
+every 20 minutes via `cat-weather.timer`. The UI only ever reads that
+file.
+
+Deliberately not fetched from the C app: that would mean linking libcurl
+and making a blocking HTTP call inside the LVGL loop, stalling the panel
+for as long as the network takes. Same shape as the backup - a timer
+writes a file, the UI reads it.
+
+Location is `lat`/`lon` in `cat_cfg.txt`, defaulting to Malmo. A failed
+fetch keeps the last file rather than blanking the panel; anything older
+than three hours is greyed out so stale numbers are not shown as current.
+
+Icons are PNGs (`wx_*.png`), five of them, with the WMO codes collapsed
+onto those five in `wx_icon_file()`.
+
 ## Backing up the log
 
 `cat_log.csv` is the only irreplaceable thing here, and it lives on an SD

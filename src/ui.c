@@ -80,6 +80,8 @@ static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 70;                          /* remembered across restarts */
 static int  photo_secs = 60;                             /* portrait shuffle interval */
+static char cfg_lat[16] = "55.6078";                     /* weather.py reads these */
+static char cfg_lon[16] = "12.9982";
 
 static const char *env_or(const char *var, const char *dflt)
 {
@@ -162,6 +164,8 @@ static void cfg_load(void)
         else if (!strcmp(k, "dim"))        { int m = atoi(v); if (m >= 0 && m <= 60) dim_min = m; }
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
         else if (!strcmp(k, "photo_secs")) { int s = atoi(v); if (s >= 5 && s <= 3600) photo_secs = s; }
+        else if (!strcmp(k, "lat"))        snprintf(cfg_lat, sizeof cfg_lat, "%s", v);
+        else if (!strcmp(k, "lon"))        snprintf(cfg_lon, sizeof cfg_lon, "%s", v);
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
         else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
@@ -173,11 +177,68 @@ static void cfg_save(void)
 {
     FILE *f = fopen(cfg_path(), "w");
     if (!f) { perror("cat cfg save"); return; }
+    /* lat/lon are written back even though nothing in the UI edits them:
+     * cfg_save rewrites the whole file, so a key it does not know about
+     * would be silently dropped the first time a setting changed. */
     fprintf(f, "days=%d\nname=%s\ndim=%d\nbacklight=%d\nphoto_secs=%d\n"
-               "reminder=%d\nreminder_h=%d\nreminder_m=%d\n",
+               "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n",
             med_mask, cat_name, dim_min, backlight_pct, photo_secs,
-            reminder_on, reminder_h, reminder_m);
+            reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon);
     fclose(f);
+}
+
+/* --- weather ---------------------------------------------------------
+ * weather.py writes weather.txt; this only ever reads it. Stale data is
+ * shown greyed rather than hidden - "17 degrees an hour ago" is more use
+ * than a blank panel. */
+
+static int  wx_temp, wx_code = -1, wx_hi, wx_lo;
+static long wx_updated;
+
+static void weather_load(void)
+{
+    FILE *f = fopen(env_or("CAT_WEATHER", "weather.txt"), "r");
+    if (!f) return;
+    char line[64], k[24], v[32];
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "%23[^=]=%31[^\n]", k, v) != 2) continue;
+        if      (!strcmp(k, "temp"))    wx_temp = atoi(v);
+        else if (!strcmp(k, "code"))    wx_code = atoi(v);
+        else if (!strcmp(k, "hi"))      wx_hi = atoi(v);
+        else if (!strcmp(k, "lo"))      wx_lo = atoi(v);
+        else if (!strcmp(k, "updated")) wx_updated = atol(v);
+    }
+    fclose(f);
+}
+
+/* WMO weather codes, collapsed to the five icons that exist. */
+static const char *wx_icon_file(int code)
+{
+    if (code == 0)                 return "A:wx_clear.png";
+    if (code <= 2)                 return "A:wx_partly.png";
+    if (code == 3 || code == 45 || code == 48) return "A:wx_cloud.png";
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "A:wx_snow.png";
+    return "A:wx_rain.png";        /* drizzle, rain, showers, thunder */
+}
+
+static const char *wx_words(int code)
+{
+    switch (code) {
+        case 0:  return "Clear";
+        case 1:  return "Mostly clear";
+        case 2:  return "Partly cloudy";
+        case 3:  return "Overcast";
+        case 45: case 48: return "Fog";
+        case 51: case 53: case 55: case 56: case 57: return "Drizzle";
+        case 61: case 63: case 66: return "Rain";
+        case 65: case 67: return "Heavy rain";
+        case 71: case 73: case 77: case 85: return "Snow";
+        case 75: case 86: return "Heavy snow";
+        case 80: case 81: return "Showers";
+        case 82: return "Heavy showers";
+        case 95: case 96: case 99: return "Thunderstorm";
+        default: return "";
+    }
 }
 
 /* --- queries -------------------------------------------------------- */
@@ -290,6 +351,7 @@ typedef struct { lv_obj_t *cell, *num, *dots, *dot[2]; } daycell_t;
 static lv_obj_t *lbl_name, *lbl_last_dose, *card_status, *lbl_status, *lbl_status_sub;
 static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *icon_dose, *week_wd[7];
 static lv_obj_t *lbl_week_no, *lbl_home_clock, *pop_event;
+static lv_obj_t *lbl_home_date, *wx_img, *lbl_wx_temp, *lbl_wx_desc;
 static int overdue_now;
 static daycell_t week_cell[7], cal_cell[42];
 static lv_obj_t *lbl_cal_month;
@@ -776,10 +838,19 @@ static void build_home(lv_obj_t *s)
     lv_obj_t *l2 = text(b2, 0, 0, LV_SYMBOL_WARNING "  Log event", &lv_font_montserrat_28, C_TEXT);
     lv_obj_center(l2);
 
-    /* Fills the gap between the buttons and the week card. */
-    lbl_home_clock = text(s, RIGHT_X, 336, "", &lv_font_montserrat_40, C_TEXT);
-    lv_obj_set_width(lbl_home_clock, RIGHT_W);
-    lv_obj_set_style_text_align(lbl_home_clock, LV_TEXT_ALIGN_CENTER, 0);
+    /* Clock and weather share one card in the gap between the buttons and
+     * the week strip: time and date left, conditions right. */
+    lv_obj_t *ck = box(s, RIGHT_X, 314, RIGHT_W, 124, C_SURF1, 20);
+    lbl_home_clock = text(ck, 28, 18, "", &lv_font_montserrat_40, C_TEXT);
+    lbl_home_date  = text(ck, 28, 76, "", &lv_font_montserrat_20, C_TEXT2);
+
+    wx_img = lv_img_create(ck);
+    lv_obj_align(wx_img, LV_ALIGN_RIGHT_MID, -26, 0);
+
+    lbl_wx_temp = text(ck, 0, 0, "", &lv_font_montserrat_32, C_TEXT);
+    lv_obj_align(lbl_wx_temp, LV_ALIGN_RIGHT_MID, -100, -16);
+    lbl_wx_desc = text(ck, 0, 0, "", &lv_font_montserrat_20, C_TEXT2);
+    lv_obj_align(lbl_wx_desc, LV_ALIGN_RIGHT_MID, -100, 20);
 
     lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
     text(wk, 30, 22, "This week", &lv_font_montserrat_20, C_TEXT2);
@@ -1071,6 +1142,29 @@ static void refresh_home(const struct tm *t, long today)
                                 lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
     overdue_now = overdue;
     lv_label_set_text_fmt(lbl_week_no, "Week %d", sched_iso_week(today));
+    lv_label_set_text_fmt(lbl_home_date, "%s %d %s",
+                          DAY[t->tm_wday], t->tm_mday, MONTH[t->tm_mon]);
+
+    weather_load();
+    if (wx_code < 0) {
+        lv_label_set_text(lbl_wx_temp, "--");
+        lv_label_set_text(lbl_wx_desc, "no data");
+        lv_obj_add_flag(wx_img, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        /* Older than three hours means the fetch has been failing, so say so
+         * by greying it rather than presenting stale numbers as current. */
+        int stale = wx_updated && (long)time(NULL) - wx_updated > 3 * 3600;
+        lv_obj_clear_flag(wx_img, LV_OBJ_FLAG_HIDDEN);
+        lv_img_set_src(wx_img, wx_icon_file(wx_code));
+        lv_obj_set_style_img_opa(wx_img, stale ? LV_OPA_40 : LV_OPA_COVER, 0);
+        lv_label_set_text_fmt(lbl_wx_temp, "%d\xC2\xB0", wx_temp);
+        lv_label_set_text_fmt(lbl_wx_desc, "%s  %d\xC2\xB0/%d\xC2\xB0",
+                              wx_words(wx_code), wx_hi, wx_lo);
+        lv_obj_set_style_text_color(lbl_wx_temp,
+                                    lv_color_hex(stale ? C_MUTED : C_TEXT), 0);
+        lv_obj_set_style_text_color(lbl_wx_desc,
+                                    lv_color_hex(stale ? C_MUTED : C_TEXT2), 0);
+    }
 
     /* Stays tappable once logged: tapping again clears today's dose, which
      * is the only way to take back a mis-tap. */

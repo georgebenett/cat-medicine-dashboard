@@ -1,0 +1,10 @@
+[Unit]
+Description=Fetch weather for the cat dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=georges
+WorkingDirectory=/home/georges/lvgl_app
+ExecStart=/home/georges/lvgl_app/weather.py
