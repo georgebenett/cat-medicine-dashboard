@@ -1,12 +1,13 @@
 /* Cat medicine dashboard.
  *
- * Three tabs: Today (is it a medicine day, log the dose, log a vomit),
- * Calendar (which days the medicine actually got given), Settings.
+ * Layout follows cat_med_dashboard_mockup.html: a left icon rail with three
+ * screens - Home (photo, dose status, this week), Calendar (month grid plus
+ * stats and recent events), Settings (backlight, dim, schedule, reminder).
  *
  * State lives in two plain text files next to the binary, so the log
- * survives a rebuild and can be read/edited without this app:
+ * survives a rebuild and can be read or edited without this app:
  *   cat_log.csv   "2026-09-08T19:47,med" | "...,vomit", append-only
- *   cat_cfg.txt   medicine-day bitmask, one integer (bit0=Sunday)
+ *   cat_cfg.txt   key=value settings, see cfg_load()
  * Override the paths with $CAT_LOG / $CAT_CFG, the photo with $CAT_IMG.
  */
 #include "ui.h"
@@ -17,14 +18,40 @@
 #include <time.h>
 #include <unistd.h>
 
-#define C_BG      0x15151b
-#define C_CARD    0x24242e
-#define C_TEXT    0xf2f2f7
-#define C_MUTED   0x8e8e9e
-#define C_GREEN   0x3ddc84
-#define C_AMBER   0xffb020
-#define C_RED     0xff5c5c
-#define C_BLUE    0x5aa9ff
+/* Semantic palette, standing in for the mockup's CSS custom properties. */
+#define C_BG        0x101014
+#define C_SURF1     0x1e1e26
+#define C_BORDER    0x2e2e3a
+#define C_BORDER_ST 0x3d3d4d
+#define C_TEXT      0xf2f2f7
+#define C_TEXT2     0xa0a0b0
+#define C_MUTED     0x6e6e80
+#define C_ACC_FILL  0x5aa9ff
+#define C_ACC_ON    0x0a0a10
+#define C_ACC_BG    0x1e2f47
+#define C_ACC_TEXT  0x7cc0ff
+#define C_OK_BG     0x16351f
+#define C_OK_TEXT   0x5ee68a
+#define C_OK_FILL   0x3ddc84
+#define C_BAD_BG    0x3a1a1e
+#define C_BAD_TEXT  0xff8f8f
+#define C_BAD_FILL  0xff5c5c
+#define C_WARN_BG   0x3a2e12
+#define C_WARN_TEXT 0xffc45c
+
+/* 1280x720. The mockup is drawn at 382px tall, so its numbers are scaled
+ * by 720/382 ~ 1.885 throughout. */
+#define SCR_W    1280
+#define SCR_H    720
+#define RAIL_W   120
+#define PAD      40
+#define BODY_X   (RAIL_W + PAD)
+#define BODY_W   (SCR_W - RAIL_W - 2 * PAD)
+#define BODY_H   (SCR_H - 2 * PAD)
+#define PHOTO_W  400
+#define GAP      38
+#define RIGHT_X  (PHOTO_W + GAP)
+#define RIGHT_W  (BODY_W - RIGHT_X)
 
 /* --- store ---------------------------------------------------------- */
 
@@ -33,8 +60,12 @@ typedef struct { int y, mo, d, h, mi; char t; } evt_t;   /* t: 'm'edicine | 'v'o
 
 static evt_t evts[MAX_EVTS];
 static int   n_evts;
-/* Mon/Wed/Fri by default - three a week, changeable in Settings. */
-static int   med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0 = Sunday */
+
+/* Settings, with the defaults the mockup shows. */
+static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fri */
+static char cat_name[32] = "Mimi";
+static int  dim_min = 10;                                /* 0 = never dim */
+static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 
 static const char *env_or(const char *var, const char *dflt)
 {
@@ -84,120 +115,285 @@ static void cfg_load(void)
 {
     FILE *f = fopen(cfg_path(), "r");
     if (!f) return;
-    int m;
-    if (fscanf(f, "%d", &m) == 1 && m > 0 && m < 128) med_mask = m;
+    char line[128];
+    while (fgets(line, sizeof line, f)) {
+        char k[32], v[64];
+        if (sscanf(line, "%31[^=]=%63[^\n]", k, v) != 2) {
+            /* The first version of this file was a bare integer mask. */
+            int m = atoi(line);
+            if (m > 0 && m < 128) med_mask = m;
+            continue;
+        }
+        if      (!strcmp(k, "days"))       { int m = atoi(v); if (m >= 0 && m < 128) med_mask = m; }
+        else if (!strcmp(k, "name"))       snprintf(cat_name, sizeof cat_name, "%s", v);
+        else if (!strcmp(k, "dim"))        { int m = atoi(v); if (m >= 0 && m <= 60) dim_min = m; }
+        else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
+        else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
+    }
     fclose(f);
 }
 
 static void cfg_save(void)
 {
     FILE *f = fopen(cfg_path(), "w");
-    if (f) { fprintf(f, "%d\n", med_mask); fclose(f); }
-    else perror("cat cfg save");
+    if (!f) { perror("cat cfg save"); return; }
+    fprintf(f, "days=%d\nname=%s\ndim=%d\nreminder=%d\nreminder_h=%d\nreminder_m=%d\n",
+            med_mask, cat_name, dim_min, reminder_on, reminder_h, reminder_m);
+    fclose(f);
 }
 
 /* --- queries -------------------------------------------------------- */
 
 static const char *DAY[]   = { "Sunday", "Monday", "Tuesday", "Wednesday",
                                "Thursday", "Friday", "Saturday" };
+static const char *DAY3[]  = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 static const char *MONTH[] = { "January", "February", "March", "April", "May", "June",
                                "July", "August", "September", "October", "November", "December" };
 static const char *MON3[]  = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
 static struct tm now_tm(void) { time_t n = time(NULL); return *localtime(&n); }
+static long evt_day(const evt_t *e) { return sched_day_num(e->y, e->mo, e->d); }
+static long today_num(void) { struct tm t = now_tm(); return sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday); }
 
-/* Latest medicine event today, or NULL. */
-static const evt_t *med_today(const struct tm *t)
+static int scheduled_per_week(void)
 {
-    for (int i = n_evts - 1; i >= 0; i--)
-        if (evts[i].t == 'm' && evts[i].y == t->tm_year + 1900 &&
-            evts[i].mo == t->tm_mon + 1 && evts[i].d == t->tm_mday)
-            return &evts[i];
-    return NULL;
-}
-
-static const evt_t *last_vomit(void)
-{
-    for (int i = n_evts - 1; i >= 0; i--) if (evts[i].t == 'v') return &evts[i];
-    return NULL;
-}
-
-static int vomits_last_7d(const struct tm *t)
-{
-    long today = sched_day_num(t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
     int n = 0;
-    for (int i = 0; i < n_evts; i++)
-        if (evts[i].t == 'v' && today - sched_day_num(evts[i].y, evts[i].mo, evts[i].d) < 7) n++;
+    for (int i = 0; i < 7; i++) if (med_mask & (1 << i)) n++;
     return n;
 }
 
-/* --- widgets -------------------------------------------------------- */
+/* Latest event of kind `t` on day `dn`, or NULL. */
+static const evt_t *evt_on_day(long dn, char t)
+{
+    for (int i = n_evts - 1; i >= 0; i--)
+        if (evts[i].t == t && evt_day(&evts[i]) == dn) return &evts[i];
+    return NULL;
+}
+
+static const evt_t *last_of(char t)
+{
+    for (int i = n_evts - 1; i >= 0; i--) if (evts[i].t == t) return &evts[i];
+    return NULL;
+}
+
+static int count_between(long from, long to, char t)   /* inclusive */
+{
+    int n = 0;
+    for (int i = 0; i < n_evts; i++) {
+        long d = evt_day(&evts[i]);
+        if (evts[i].t == t && d >= from && d <= to) n++;
+    }
+    return n;
+}
+
+/* Consecutive fully-complete weeks before the current one: every scheduled
+ * day in the week has a dose logged. Stops at the first miss, so an empty
+ * log gives 0. */
+static int streak_weeks(void)
+{
+    if (!scheduled_per_week()) return 0;
+    long this_mon = sched_monday(today_num());
+    int weeks = 0;
+    for (int w = 1; w <= 520; w++) {                     /* 10 years is plenty */
+        long mon = this_mon - 7L * w;
+        int complete = 1;
+        for (int i = 0; i < 7 && complete; i++) {
+            long d = mon + i;
+            if ((med_mask >> sched_wday(d)) & 1) complete = evt_on_day(d, 'm') != NULL;
+        }
+        if (!complete) break;
+        weeks++;
+    }
+    return weeks;
+}
+
+/* Doses scheduled in the given month up to and including today. */
+static void month_progress(int y, int m, int *given, int *due)
+{
+    long today = today_num();
+    int nd = sched_days_in_month(y, m);
+    *given = 0; *due = 0;
+    for (int d = 1; d <= nd; d++) {
+        long dn = sched_day_num(y, m, d);
+        if (dn > today) break;
+        if ((med_mask >> sched_wday(dn)) & 1) (*due)++;
+        if (evt_on_day(dn, 'm')) (*given)++;
+    }
+}
+
+/* --- widget helpers ------------------------------------------------- */
 
 lv_obj_t *ui_backlight_slider;
 
-static lv_obj_t *lbl_date, *lbl_status, *lbl_sub, *btn_med, *lbl_med, *lbl_stats;
-static lv_obj_t *cal, *lbl_recent, *lbl_bl_val, *bm_days, *lbl_clock;
-static lv_calendar_date_t hl_dates[512];
+static lv_obj_t *screens[3];
+static int  cur_screen;
+static int  cal_y, cal_m;                                /* month the calendar shows */
+static lv_obj_t *rail_items[3];
 
-static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
+static lv_obj_t *lbl_name, *lbl_last_dose, *card_status, *lbl_status, *lbl_status_sub;
+static lv_obj_t *btn_dose, *lbl_btn_dose, *week_num[7], *week_cell[7], *week_wd[7];
+static lv_obj_t *cal_cell[42], *cal_num[42], *lbl_cal_month;
+static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
+static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
+static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
+static time_t    toast_until;
+static int       blink_on;
+
+static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h, uint32_t bg, int radius)
 {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_set_pos(o, x, y);
     lv_obj_set_size(o, w, h);
-    lv_obj_set_style_bg_color(o, lv_color_hex(C_CARD), 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(o, 0, 0);
-    lv_obj_set_style_radius(o, 18, 0);
-    lv_obj_set_style_pad_all(o, 16, 0);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
     lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
     return o;
 }
 
-static lv_obj_t *text(lv_obj_t *parent, const char *s, const lv_font_t *font, uint32_t color)
+static lv_obj_t *text(lv_obj_t *parent, int x, int y, const char *s,
+                      const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *l = lv_label_create(parent);
     lv_label_set_text(l, s);
     lv_obj_set_style_text_font(l, font, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
+    lv_obj_set_pos(l, x, y);
     return l;
+}
+
+/* A circle with a centred number: the week strip and calendar cells. */
+static lv_obj_t *circle(lv_obj_t *parent, int x, int y, int d, lv_obj_t **out_lbl,
+                        const lv_font_t *font)
+{
+    lv_obj_t *c = box(parent, x, y, d, d, C_SURF1, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_opa(c, LV_OPA_0, 0);
+    lv_obj_t *l = lv_label_create(c);
+    lv_obj_set_style_text_font(l, font, 0);
+    lv_label_set_text(l, "");
+    lv_obj_center(l);
+    *out_lbl = l;
+    return c;
+}
+
+static void cell_style(lv_obj_t *cell, lv_obj_t *lbl, uint32_t bg, lv_opa_t bg_opa,
+                       uint32_t fg, uint32_t border, int border_w)
+{
+    lv_obj_set_style_bg_color(cell, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_opa(cell, bg_opa, 0);
+    lv_obj_set_style_border_color(cell, lv_color_hex(border), 0);
+    lv_obj_set_style_border_width(cell, border_w, 0);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(fg), 0);
 }
 
 static void refresh(void);
 
-static void med_cb(lv_event_t *e)  { (void)e; store_append('m'); refresh(); }
-static void vomit_cb(lv_event_t *e){ (void)e; store_append('v'); refresh(); }
+/* --- events --------------------------------------------------------- */
 
-static void days_cb(lv_event_t *e)
+static void toast(const char *msg)
 {
-    lv_obj_t *bm = lv_event_get_target(e);
-    int mask = 0;
-    for (int i = 0; i < 7; i++)
-        if (lv_btnmatrix_has_btn_ctrl(bm, i, LV_BTNMATRIX_CTRL_CHECKED)) mask |= (1 << i);
-    med_mask = mask;
+    lv_label_set_text(lbl_toast, msg);
+    lv_obj_clear_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
+    toast_until = time(NULL) + 3;
+}
+
+static void show_screen(int i)
+{
+    cur_screen = i;
+    for (int k = 0; k < 3; k++) {
+        if (k == i) lv_obj_clear_flag(screens[k], LV_OBJ_FLAG_HIDDEN);
+        else        lv_obj_add_flag(screens[k], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_opa(rail_items[k], k == i ? LV_OPA_COVER : LV_OPA_0, 0);
+        lv_obj_set_style_text_color(lv_obj_get_child(rail_items[k], 0),
+                                    lv_color_hex(k == i ? C_ACC_TEXT : C_TEXT2), 0);
+    }
+    refresh();
+}
+
+static void rail_cb(lv_event_t *e)   { show_screen((int)(intptr_t)lv_event_get_user_data(e)); }
+static void dose_cb(lv_event_t *e)   { (void)e; store_append('m'); toast("Dose logged"); refresh(); }
+static void event_cb(lv_event_t *e)  { (void)e; store_append('v'); toast("Event logged"); refresh(); }
+
+static void cal_step_cb(lv_event_t *e)
+{
+    cal_m += (int)(intptr_t)lv_event_get_user_data(e);
+    if (cal_m < 1)  { cal_m = 12; cal_y--; }
+    if (cal_m > 12) { cal_m = 1;  cal_y++; }
+    refresh();
+}
+
+static void day_pill_cb(lv_event_t *e)
+{
+    med_mask ^= 1 << (int)(intptr_t)lv_event_get_user_data(e);
     cfg_save();
     refresh();
 }
 
-static lv_obj_t *big_btn(lv_obj_t *parent, int x, int y, int w, int h,
-                         uint32_t color, const char *txt, lv_event_cb_t cb, lv_obj_t **out_lbl)
+static void dim_cb(lv_event_t *e)
 {
-    lv_obj_t *b = lv_btn_create(parent);
-    lv_obj_set_pos(b, x, y);
-    lv_obj_set_size(b, w, h);
-    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-    lv_obj_set_style_radius(b, 16, 0);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *l = text(b, txt, &lv_font_montserrat_28, 0x101014);
-    lv_obj_center(l);
-    if (out_lbl) *out_lbl = l;
-    return b;
+    dim_min = (int)lv_slider_get_value(lv_event_get_target(e));
+    cfg_save();
+    refresh();
 }
 
-/* The photo is a file, not a compiled-in C array: drop any PNG at
- * cat.png next to the binary and restart, no rebuild. */
+static void reminder_cb(lv_event_t *e)
+{
+    reminder_on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    cfg_save();
+    refresh();
+}
+
+/* The log is already a CSV; "export" just drops a dated copy beside it that
+ * can be scp'd off without touching the live file the app appends to. */
+static void export_cb(lv_event_t *e)
+{
+    (void)e;
+    struct tm t = now_tm();
+    char dst[256], buf[4096];
+    snprintf(dst, sizeof dst, "cat_log_%04d-%02d-%02d_%02d%02d.csv",
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+    FILE *in = fopen(log_path(), "r");
+    if (!in) { toast("Nothing to export yet"); return; }
+    FILE *out = fopen(dst, "w");
+    if (!out) { fclose(in); toast("Export failed"); return; }
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, n, out);
+    fclose(in); fclose(out);
+    printf("exported log to %s\n", dst);
+    toast(dst);
+}
+
+/* --- screens -------------------------------------------------------- */
+
+static void build_rail(lv_obj_t *parent)
+{
+    static const char *icons[3] = { LV_SYMBOL_HOME, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS };
+    lv_obj_t *rail = box(parent, 0, 0, RAIL_W, SCR_H, C_SURF1, 0);
+    lv_obj_set_style_border_side(rail, LV_BORDER_SIDE_RIGHT, 0);
+    lv_obj_set_style_border_color(rail, lv_color_hex(C_BORDER), 0);
+    lv_obj_set_style_border_width(rail, 1, 0);
+
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *it = box(rail, 18, 22 + i * 96, 83, 83, C_ACC_BG, 20);
+        lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(it, rail_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_t *l = lv_label_create(it);
+        lv_label_set_text(l, icons[i]);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_40, 0);
+        lv_obj_center(l);
+        rail_items[i] = it;
+    }
+}
+
+/* The photo is a file, not a compiled-in C array: drop any PNG at cat.png
+ * next to the binary and restart, no rebuild. */
 static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 {
-    lv_obj_t *c = card(parent, x, y, w, h);
+    lv_obj_t *c = box(parent, x, y, w, h, C_SURF1, 38);
     const char *file = img_path();
     static char src[512];
     snprintf(src, sizeof src, "A:%s", file);
@@ -207,10 +403,10 @@ static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
         hdr.w > 0 && hdr.h > 0 && (long)hdr.w * hdr.h * 4 < 6L * 1024 * 1024) {
         lv_obj_t *img = lv_img_create(c);
         lv_img_set_src(img, src);
-        /* Scale down to fit the card; never upscale (a small photo would blur). */
-        int box = (w < h ? w : h) - 32;
+        /* Scale down to fit; never upscale, a small photo would just blur. */
+        int box_px = (w < h ? w : h) - 24;
         int longest = hdr.w > hdr.h ? hdr.w : hdr.h;
-        int zoom = 256 * box / longest;
+        int zoom = 256 * box_px / longest;
         if (zoom > 256) zoom = 256;
         if (zoom < 16)  zoom = 16;
         lv_img_set_zoom(img, (uint16_t)zoom);
@@ -219,173 +415,357 @@ static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
         printf("photo: %s %dx%d zoom %d/256\n", file, hdr.w, hdr.h, zoom);
     } else {
         printf("photo: %s missing or too large to decode - showing placeholder\n", file);
-        lv_obj_t *l = text(c, "Put a photo of her at\n\ncat.png\n\n(PNG, under ~1200px)",
-                           &lv_font_montserrat_20, C_MUTED);
+        lv_obj_set_style_bg_color(c, lv_color_hex(C_WARN_BG), 0);
+        lv_obj_t *l = text(c, 0, 0, "Put a photo of her at\ncat.png", &lv_font_montserrat_24, C_WARN_TEXT);
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(l);
     }
 }
 
-static void build_today(lv_obj_t *tab)
+static void build_home(lv_obj_t *s)
 {
-    build_photo(tab, 20, 8, 500, 620);
+    build_photo(s, 0, 0, PHOTO_W, PHOTO_W);
+    lbl_name = text(s, 0, PHOTO_W + 22, "", &lv_font_montserrat_32, C_TEXT);
+    lv_obj_set_width(lbl_name, PHOTO_W);
+    lv_obj_set_style_text_align(lbl_name, LV_TEXT_ALIGN_CENTER, 0);
+    lbl_last_dose = text(s, 0, PHOTO_W + 66, "", &lv_font_montserrat_22, C_TEXT2);
+    lv_obj_set_width(lbl_last_dose, PHOTO_W);
+    lv_obj_set_style_text_align(lbl_last_dose, LV_TEXT_ALIGN_CENTER, 0);
 
-    lv_obj_t *c = card(tab, 540, 8, 700, 620);
-    lbl_date   = text(c, "", &lv_font_montserrat_20, C_MUTED);
-    lv_obj_set_pos(lbl_date, 4, 0);
+    card_status = box(s, RIGHT_X, 0, RIGHT_W, 160, C_OK_BG, 22);
+    lbl_status     = text(card_status, 30, 34, "", &lv_font_montserrat_36, C_OK_TEXT);
+    lbl_status_sub = text(card_status, 30, 92, "", &lv_font_montserrat_24, C_OK_TEXT);
 
-    lbl_status = text(c, "", &lv_font_montserrat_48, C_TEXT);
-    lv_obj_set_pos(lbl_status, 4, 36);
+    int bw = (RIGHT_W - 22) / 2;
+    btn_dose = lv_btn_create(s);
+    lv_obj_set_pos(btn_dose, RIGHT_X, 182);
+    lv_obj_set_size(btn_dose, bw, 120);
+    lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
+    lv_obj_set_style_radius(btn_dose, 20, 0);
+    lv_obj_add_event_cb(btn_dose, dose_cb, LV_EVENT_CLICKED, NULL);
+    lbl_btn_dose = text(btn_dose, 0, 0, LV_SYMBOL_OK "  Log dose given", &lv_font_montserrat_28, C_ACC_ON);
+    lv_obj_center(lbl_btn_dose);
 
-    lbl_sub    = text(c, "", &lv_font_montserrat_20, C_MUTED);
-    lv_obj_set_pos(lbl_sub, 4, 104);
+    lv_obj_t *b2 = lv_btn_create(s);
+    lv_obj_set_pos(b2, RIGHT_X + bw + 22, 182);
+    lv_obj_set_size(b2, bw, 120);
+    lv_obj_set_style_bg_opa(b2, LV_OPA_0, 0);
+    lv_obj_set_style_border_color(b2, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_border_width(b2, 2, 0);
+    lv_obj_set_style_radius(b2, 20, 0);
+    lv_obj_add_event_cb(b2, event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l2 = text(b2, 0, 0, LV_SYMBOL_WARNING "  Log event", &lv_font_montserrat_28, C_TEXT);
+    lv_obj_center(l2);
 
-    btn_med = big_btn(c, 4, 156, 660, 150, C_GREEN, "Medicine given", med_cb, &lbl_med);
-    big_btn(c, 4, 326, 660, 110, C_AMBER, "Log vomiting", vomit_cb, NULL);
-
-    lbl_stats = text(c, "", &lv_font_montserrat_20, C_MUTED);
-    lv_obj_set_pos(lbl_stats, 4, 462);
-}
-
-static void build_calendar(lv_obj_t *tab)
-{
-    lv_obj_t *c = card(tab, 20, 8, 640, 620);
-    cal = lv_calendar_create(c);
-    lv_obj_set_size(cal, 600, 570);
-    lv_obj_center(cal);
-    lv_calendar_header_arrow_create(cal);
-
-    lv_obj_t *r = card(tab, 680, 8, 560, 620);
-    lv_obj_t *t = text(r, "Recent", &lv_font_montserrat_28, C_TEXT);
-    lv_obj_set_pos(t, 4, 0);
-    lbl_recent = text(r, "", &lv_font_montserrat_20, C_MUTED);
-    lv_obj_set_pos(lbl_recent, 4, 48);
-    lv_label_set_long_mode(lbl_recent, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(lbl_recent, 510);
-}
-
-static void build_settings(lv_obj_t *tab)
-{
-    lv_obj_t *c = card(tab, 20, 8, 620, 300);
-    lv_obj_t *t = text(c, "Backlight", &lv_font_montserrat_28, C_TEXT);
-    lv_obj_set_pos(t, 4, 0);
-    lbl_bl_val = text(c, "", &lv_font_montserrat_48, C_BLUE);
-    lv_obj_set_pos(lbl_bl_val, 4, 48);
-
-    ui_backlight_slider = lv_slider_create(c);
-    lv_obj_set_size(ui_backlight_slider, 560, 40);
-    lv_obj_set_pos(ui_backlight_slider, 4, 150);
-    lv_slider_set_range(ui_backlight_slider, 5, 100);
-    lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_BLUE), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_BLUE), LV_PART_KNOB);
-
-    lv_obj_t *d = card(tab, 660, 8, 580, 300);
-    t = text(d, "Medicine days", &lv_font_montserrat_28, C_TEXT);
-    lv_obj_set_pos(t, 4, 0);
-
-    static const char *map[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "" };
-    bm_days = lv_btnmatrix_create(d);
-    lv_btnmatrix_set_map(bm_days, map);
-    lv_obj_set_size(bm_days, 540, 90);
-    lv_obj_set_pos(bm_days, 4, 60);
-    lv_obj_set_style_bg_opa(bm_days, LV_OPA_0, 0);
-    lv_obj_set_style_border_width(bm_days, 0, 0);
-    lv_obj_set_style_bg_color(bm_days, lv_color_hex(C_GREEN), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(bm_days, lv_color_hex(0x101014), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 22);
+    text(wk, 30, 22, "This week", &lv_font_montserrat_22, C_TEXT2);
+    int step = (RIGHT_W - 60) / 7;
     for (int i = 0; i < 7; i++) {
-        lv_btnmatrix_set_btn_ctrl(bm_days, i, LV_BTNMATRIX_CTRL_CHECKABLE);
-        if (med_mask & (1 << i)) lv_btnmatrix_set_btn_ctrl(bm_days, i, LV_BTNMATRIX_CTRL_CHECKED);
+        int x = 30 + i * step;
+        week_wd[i] = text(wk, x, 66, "", &lv_font_montserrat_20, C_MUTED);
+        lv_obj_set_width(week_wd[i], step - 8);
+        lv_obj_set_style_text_align(week_wd[i], LV_TEXT_ALIGN_CENTER, 0);
+        week_cell[i] = circle(wk, x + (step - 8 - 60) / 2, 98, 60, &week_num[i], &lv_font_montserrat_26);
     }
-    lv_obj_add_event_cb(bm_days, days_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
 
-    lv_obj_t *e = card(tab, 20, 328, 1220, 300);
-    lbl_clock = text(e, "", &lv_font_montserrat_48, C_TEXT);
-    lv_obj_set_pos(lbl_clock, 4, 0);
-    char buf[600];
-    snprintf(buf, sizeof buf, "log: %s\ncfg: %s\nphoto: %s", log_path(), cfg_path(), img_path());
-    lv_obj_t *p = text(e, buf, &lv_font_montserrat_20, C_MUTED);
-    lv_obj_set_pos(p, 4, 90);
+static void build_calendar(lv_obj_t *s)
+{
+    const int CAL_W = 622, CELL = 68, STEP = 79;
+
+    lv_obj_t *prev = lv_btn_create(s);
+    lv_obj_set_pos(prev, 0, 0); lv_obj_set_size(prev, 60, 60);
+    lv_obj_set_style_bg_opa(prev, LV_OPA_0, 0);
+    lv_obj_add_event_cb(prev, cal_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+    lv_obj_center(text(prev, 0, 0, LV_SYMBOL_LEFT, &lv_font_montserrat_28, C_TEXT2));
+
+    lbl_cal_month = text(s, 60, 12, "", &lv_font_montserrat_32, C_TEXT);
+    lv_obj_set_width(lbl_cal_month, CAL_W - 120);
+    lv_obj_set_style_text_align(lbl_cal_month, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_t *next = lv_btn_create(s);
+    lv_obj_set_pos(next, CAL_W - 60, 0); lv_obj_set_size(next, 60, 60);
+    lv_obj_set_style_bg_opa(next, LV_OPA_0, 0);
+    lv_obj_add_event_cb(next, cal_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
+    lv_obj_center(text(next, 0, 0, LV_SYMBOL_RIGHT, &lv_font_montserrat_28, C_TEXT2));
+
+    /* Weeks run Mon..Sun, like the mockup. */
+    static const char *wd[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+    for (int i = 0; i < 7; i++) {
+        lv_obj_t *l = text(s, i * STEP, 74, wd[i], &lv_font_montserrat_20, C_MUTED);
+        lv_obj_set_width(l, CELL);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    }
+    for (int i = 0; i < 42; i++)
+        cal_cell[i] = circle(s, (i % 7) * STEP, 108 + (i / 7) * STEP, CELL,
+                             &cal_num[i], &lv_font_montserrat_24);
+
+    int ly = 108 + 6 * STEP + 10;
+    box(s, 0, ly + 8, 18, 18, C_OK_FILL, LV_RADIUS_CIRCLE);
+    text(s, 28, ly, "Dose given", &lv_font_montserrat_22, C_TEXT2);
+    box(s, 190, ly + 8, 18, 18, C_BAD_FILL, LV_RADIUS_CIRCLE);
+    text(s, 218, ly, "Event", &lv_font_montserrat_22, C_TEXT2);
+
+    /* Right column: three stat cards over the recent list. */
+    const int RX = CAL_W + GAP, RW = BODY_W - RX, SW = (RW - 24) / 3;
+    const char *names[3] = { "This month", "Streak", "Events" };
+    lv_obj_t **vals[3] = { &lbl_stat_month, &lbl_stat_streak, &lbl_stat_events };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *c = box(s, RX + i * (SW + 12), 0, SW, 110, C_SURF1, 18);
+        text(c, 16, 16, names[i], &lv_font_montserrat_20, C_TEXT2);
+        *vals[i] = text(c, 16, 48, "", &lv_font_montserrat_36, C_TEXT);
+    }
+    text(s, RX, 132, "Recent", &lv_font_montserrat_22, C_TEXT2);
+    lbl_recent = text(s, RX, 172, "", &lv_font_montserrat_22, C_TEXT);
+    lv_obj_set_width(lbl_recent, RW);
+    lv_label_set_long_mode(lbl_recent, LV_LABEL_LONG_CLIP);
+}
+
+static lv_obj_t *settings_row(lv_obj_t *s, int y, int h, const char *icon, const char *label)
+{
+    lv_obj_t *c = box(s, 0, y, BODY_W, h, C_SURF1, 18);
+    lv_obj_t *i = text(c, 28, 0, icon, &lv_font_montserrat_28, C_TEXT2);
+    lv_obj_align(i, LV_ALIGN_LEFT_MID, 28, 0);
+    lv_obj_t *l = text(c, 80, 0, label, &lv_font_montserrat_26, C_TEXT);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 80, 0);
+    return c;
+}
+
+static void build_settings(lv_obj_t *s)
+{
+    const int RH = 104, RY = 118, VX = 300;
+
+    lv_obj_t *r = settings_row(s, 0, RH, LV_SYMBOL_EYE_OPEN, "Backlight");
+    ui_backlight_slider = lv_slider_create(r);
+    lv_obj_set_size(ui_backlight_slider, BODY_W - VX - 160, 26);
+    lv_obj_align(ui_backlight_slider, LV_ALIGN_LEFT_MID, VX, 0);
+    lv_slider_set_range(ui_backlight_slider, 5, 100);
+    lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
+    lbl_bl_val = text(r, 0, 0, "", &lv_font_montserrat_26, C_TEXT);
+    lv_obj_align(lbl_bl_val, LV_ALIGN_RIGHT_MID, -28, 0);
+
+    r = settings_row(s, RY, RH, LV_SYMBOL_POWER, "Dim after");
+    sld_dim = lv_slider_create(r);
+    lv_obj_set_size(sld_dim, BODY_W - VX - 160, 26);
+    lv_obj_align(sld_dim, LV_ALIGN_LEFT_MID, VX, 0);
+    lv_slider_set_range(sld_dim, 0, 30);
+    lv_slider_set_value(sld_dim, dim_min, LV_ANIM_OFF);
+    lv_obj_add_event_cb(sld_dim, dim_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
+    lbl_dim_val = text(r, 0, 0, "", &lv_font_montserrat_26, C_TEXT);
+    lv_obj_align(lbl_dim_val, LV_ALIGN_RIGHT_MID, -28, 0);
+
+    r = settings_row(s, 2 * RY, RH, LV_SYMBOL_OK, "Medicine days");
+    for (int i = 0; i < 7; i++) {
+        /* Displayed Mon..Sun, stored bit0=Sun. */
+        int wday = (i + 1) % 7;
+        lv_obj_t *p = lv_btn_create(r);
+        lv_obj_set_size(p, 92, 56);
+        lv_obj_align(p, LV_ALIGN_LEFT_MID, VX + i * 102, 0);
+        lv_obj_set_style_radius(p, 28, 0);
+        lv_obj_add_event_cb(p, day_pill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)wday);
+        lv_obj_t *l = text(p, 0, 0, DAY3[wday], &lv_font_montserrat_22, C_TEXT);
+        lv_obj_center(l);
+        day_pill[i] = p;
+    }
+
+    r = settings_row(s, 3 * RY, RH, LV_SYMBOL_BELL, "Reminder");
+    lbl_reminder = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
+    lv_obj_align(lbl_reminder, LV_ALIGN_LEFT_MID, VX, 0);
+    sw_reminder = lv_switch_create(r);
+    lv_obj_set_size(sw_reminder, 84, 44);
+    lv_obj_align(sw_reminder, LV_ALIGN_RIGHT_MID, -28, 0);
+    lv_obj_set_style_bg_color(sw_reminder, lv_color_hex(C_OK_FILL), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sw_reminder, reminder_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lbl_footer = text(s, 0, BODY_H - 46, "", &lv_font_montserrat_22, C_TEXT2);
+    lv_obj_t *ex = lv_btn_create(s);
+    lv_obj_set_size(ex, 230, 62);
+    lv_obj_set_pos(ex, BODY_W - 230, BODY_H - 62);
+    lv_obj_set_style_bg_opa(ex, LV_OPA_0, 0);
+    lv_obj_set_style_border_color(ex, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_border_width(ex, 2, 0);
+    lv_obj_set_style_radius(ex, 18, 0);
+    lv_obj_add_event_cb(ex, export_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_center(text(ex, 0, 0, LV_SYMBOL_DOWNLOAD "  Export log", &lv_font_montserrat_22, C_TEXT));
 }
 
 /* --- refresh -------------------------------------------------------- */
 
+static int dose_overdue(const struct tm *t, int is_med_day, const evt_t *given)
+{
+    if (!reminder_on || !is_med_day || given) return 0;
+    return t->tm_hour * 60 + t->tm_min >= reminder_h * 60 + reminder_m;
+}
+
+static void refresh_home(const struct tm *t, long today)
+{
+    char buf[256];
+    int is_med_day = (med_mask >> t->tm_wday) & 1;
+    const evt_t *given = evt_on_day(today, 'm');
+    const evt_t *last  = last_of('m');
+
+    lv_label_set_text(lbl_name, cat_name);
+    if (last) {
+        long dn = evt_day(last);
+        snprintf(buf, sizeof buf, "Last dose: %s %d %s, %02d:%02d",
+                 DAY3[sched_wday(dn)], last->d, MON3[last->mo - 1], last->h, last->mi);
+    } else {
+        snprintf(buf, sizeof buf, "No dose logged yet");
+    }
+    lv_label_set_text(lbl_last_dose, buf);
+
+    long mon = sched_monday(today);
+    int done = count_between(mon, mon + 6, 'm');
+    int per_week = scheduled_per_week();
+    int nx = sched_next_wday(med_mask, t->tm_wday);
+    int overdue = dose_overdue(t, is_med_day, given);
+
+    uint32_t bg = C_SURF1, fg = C_TEXT2;
+    if (given)        { bg = C_OK_BG;   fg = C_OK_TEXT; }
+    else if (overdue) { bg = C_BAD_BG;  fg = C_BAD_TEXT; }
+    else if (is_med_day) { bg = C_OK_BG; fg = C_OK_TEXT; }
+
+    if (given) {
+        lv_label_set_text(lbl_status, LV_SYMBOL_OK "  Dose logged today");
+        snprintf(buf, sizeof buf, "at %02d:%02d \xC2\xB7 dose %d of %d this week",
+                 given->h, given->mi, done, per_week);
+    } else if (overdue) {
+        lv_label_set_text(lbl_status, LV_SYMBOL_BELL "  Dose overdue");
+        snprintf(buf, sizeof buf, "due at %02d:%02d \xC2\xB7 not logged yet", reminder_h, reminder_m);
+    } else if (is_med_day) {
+        lv_label_set_text(lbl_status, "Today is a medicine day");
+        snprintf(buf, sizeof buf, "%s \xC2\xB7 dose %d of %d this week \xC2\xB7 next: %s",
+                 DAY[t->tm_wday], done + 1, per_week, nx >= 0 ? DAY[nx] : "not set");
+    } else {
+        lv_label_set_text(lbl_status, "No medicine today");
+        if (nx >= 0) snprintf(buf, sizeof buf, "%s \xC2\xB7 next dose: %s", DAY[t->tm_wday], DAY[nx]);
+        else         snprintf(buf, sizeof buf, "No days scheduled - set them in Settings");
+    }
+    lv_label_set_text(lbl_status_sub, buf);
+
+    /* Overdue blinks rather than animating: one colour swap per second in
+     * ui_tick is cheaper than an animation on a software-rotated panel. */
+    lv_obj_set_style_bg_color(card_status,
+                              lv_color_hex(overdue && blink_on ? C_BAD_TEXT : bg), 0);
+    lv_obj_set_style_text_color(lbl_status,     lv_color_hex(overdue && blink_on ? C_BAD_BG : fg), 0);
+    lv_obj_set_style_text_color(lbl_status_sub, lv_color_hex(overdue && blink_on ? C_BAD_BG : fg), 0);
+
+    if (given) {
+        lv_obj_add_state(btn_dose, LV_STATE_DISABLED);
+        lv_label_set_text(lbl_btn_dose, LV_SYMBOL_OK "  Already logged");
+    } else {
+        lv_obj_clear_state(btn_dose, LV_STATE_DISABLED);
+        lv_label_set_text(lbl_btn_dose, LV_SYMBOL_OK "  Log dose given");
+    }
+
+    for (int i = 0; i < 7; i++) {
+        long dn = mon + i;
+        int y2, m2, d2;
+        sched_civil(dn, &y2, &m2, &d2);
+        lv_label_set_text(week_wd[i], DAY3[sched_wday(dn)]);
+        lv_label_set_text_fmt(week_num[i], "%d", d2);
+        if (dn == today)
+            cell_style(week_cell[i], week_num[i], C_BG, LV_OPA_0, C_ACC_TEXT, C_ACC_FILL, 3);
+        else if (evt_on_day(dn, 'm'))
+            cell_style(week_cell[i], week_num[i], C_OK_BG, LV_OPA_COVER, C_OK_TEXT, C_BG, 0);
+        else
+            cell_style(week_cell[i], week_num[i], C_BG, LV_OPA_0, C_MUTED, C_BG, 0);
+    }
+}
+
+static void refresh_calendar(long today)
+{
+    char buf[1024];
+    lv_label_set_text_fmt(lbl_cal_month, "%s %d", MONTH[cal_m - 1], cal_y);
+
+    long first = sched_day_num(cal_y, cal_m, 1);
+    long grid0 = sched_monday(first);                    /* grid starts on a Monday */
+    int  ndays = sched_days_in_month(cal_y, cal_m);
+
+    for (int i = 0; i < 42; i++) {
+        long dn = grid0 + i;
+        long off = dn - first;
+        int in_month = off >= 0 && off < ndays;
+        int cy, cm, dom;
+        sched_civil(dn, &cy, &cm, &dom);
+        lv_label_set_text_fmt(cal_num[i], "%d", dom);
+
+        int has_dose  = evt_on_day(dn, 'm') != NULL;
+        int has_event = evt_on_day(dn, 'v') != NULL;
+        if (!in_month)
+            cell_style(cal_cell[i], cal_num[i], C_BG, LV_OPA_0, 0x45455a, C_BG, 0);
+        else if (dn == today)
+            cell_style(cal_cell[i], cal_num[i], C_BG, LV_OPA_0, C_ACC_TEXT, C_ACC_FILL, 3);
+        else if (has_dose)
+            cell_style(cal_cell[i], cal_num[i], C_OK_BG, LV_OPA_COVER, C_OK_TEXT,
+                       has_event ? C_BAD_FILL : C_BG, has_event ? 3 : 0);
+        else if (has_event)
+            cell_style(cal_cell[i], cal_num[i], C_BAD_BG, LV_OPA_COVER, C_BAD_TEXT, C_BG, 0);
+        else
+            cell_style(cal_cell[i], cal_num[i], C_BG, LV_OPA_0, C_TEXT, C_BG, 0);
+    }
+
+    int given, due;
+    month_progress(cal_y, cal_m, &given, &due);
+    lv_label_set_text_fmt(lbl_stat_month, "%d / %d", given, due);
+    lv_label_set_text_fmt(lbl_stat_streak, "%d wk", streak_weeks());
+    lv_label_set_text_fmt(lbl_stat_events, "%d",
+                          count_between(sched_day_num(cal_y, cal_m, 1),
+                                        sched_day_num(cal_y, cal_m, sched_days_in_month(cal_y, cal_m)), 'v'));
+
+    size_t off = 0;
+    buf[0] = 0;
+    for (int i = n_evts - 1, shown = 0; i >= 0 && shown < 9; i--, shown++) {
+        long dn = evt_day(&evts[i]);
+        int n = snprintf(buf + off, sizeof buf - off, "%s  %-12s %s %d %s %02d:%02d\n",
+                         evts[i].t == 'v' ? LV_SYMBOL_WARNING : LV_SYMBOL_OK,
+                         evts[i].t == 'v' ? "Event" : "Dose given",
+                         DAY3[sched_wday(dn)], evts[i].d, MON3[evts[i].mo - 1],
+                         evts[i].h, evts[i].mi);
+        if (n < 0 || (size_t)n >= sizeof buf - off) break;
+        off += (size_t)n;
+    }
+    lv_label_set_text(lbl_recent, buf[0] ? buf : "Nothing logged yet.");
+}
+
+static void refresh_settings(const struct tm *t)
+{
+    if (ui_backlight_slider)
+        lv_label_set_text_fmt(lbl_bl_val, "%d%%", (int)lv_slider_get_value(ui_backlight_slider));
+    if (dim_min) lv_label_set_text_fmt(lbl_dim_val, "%d min", dim_min);
+    else         lv_label_set_text(lbl_dim_val, "never");
+
+    for (int i = 0; i < 7; i++) {
+        int wday = (i + 1) % 7;
+        int on = (med_mask >> wday) & 1;
+        lv_obj_set_style_bg_color(day_pill[i], lv_color_hex(on ? C_OK_BG : C_SURF1), 0);
+        lv_obj_set_style_bg_opa(day_pill[i], on ? LV_OPA_COVER : LV_OPA_0, 0);
+        lv_obj_set_style_border_color(day_pill[i], lv_color_hex(on ? C_OK_FILL : C_BORDER_ST), 0);
+        lv_obj_set_style_border_width(day_pill[i], 2, 0);
+        lv_obj_set_style_text_color(lv_obj_get_child(day_pill[i], 0),
+                                    lv_color_hex(on ? C_OK_TEXT : C_TEXT2), 0);
+    }
+
+    lv_label_set_text_fmt(lbl_reminder, "%02d:%02d \xC2\xB7 flash screen until logged",
+                          reminder_h, reminder_m);
+    if (reminder_on) lv_obj_add_state(sw_reminder, LV_STATE_CHECKED);
+    else             lv_obj_clear_state(sw_reminder, LV_STATE_CHECKED);
+
+    lv_label_set_text_fmt(lbl_footer, "%d %s %d \xC2\xB7 %02d:%02d \xC2\xB7 %d events logged",
+                          t->tm_mday, MON3[t->tm_mon], t->tm_year + 1900,
+                          t->tm_hour, t->tm_min, n_evts);
+}
+
 static void refresh(void)
 {
     struct tm t = now_tm();
-    char buf[1024];
-
-    snprintf(buf, sizeof buf, "%s, %d %s %d",
-             DAY[t.tm_wday], t.tm_mday, MONTH[t.tm_mon], t.tm_year + 1900);
-    lv_label_set_text(lbl_date, buf);
-
-    int is_med_day = (med_mask >> t.tm_wday) & 1;
-    const evt_t *given = med_today(&t);
-
-    if (given) {
-        lv_label_set_text(lbl_status, "All done today");
-        lv_obj_set_style_text_color(lbl_status, lv_color_hex(C_GREEN), 0);
-        snprintf(buf, sizeof buf, "Medicine given at %02d:%02d.%s",
-                 given->h, given->mi, is_med_day ? "" : "  (not a scheduled day)");
-    } else if (is_med_day) {
-        lv_label_set_text(lbl_status, "MEDICINE DAY");
-        lv_obj_set_style_text_color(lbl_status, lv_color_hex(C_AMBER), 0);
-        snprintf(buf, sizeof buf, "Not given yet today.");
-    } else {
-        lv_label_set_text(lbl_status, "No medicine today");
-        lv_obj_set_style_text_color(lbl_status, lv_color_hex(C_MUTED), 0);
-        int nx = sched_next_wday(med_mask, t.tm_wday);
-        if (nx >= 0) snprintf(buf, sizeof buf, "Next dose: %s.", DAY[nx]);
-        else         snprintf(buf, sizeof buf, "No days scheduled - set them in Settings.");
-    }
-    lv_label_set_text(lbl_sub, buf);
-
-    /* Already logged today: grey the button out so a double tap can't double-dose the log. */
-    if (given) {
-        lv_obj_add_state(btn_med, LV_STATE_DISABLED);
-        lv_label_set_text(lbl_med, "Already given today");
-    } else {
-        lv_obj_clear_state(btn_med, LV_STATE_DISABLED);
-        lv_label_set_text(lbl_med, "Medicine given");
-    }
-
-    const evt_t *v = last_vomit();
-    int v7 = vomits_last_7d(&t);
-    if (!v) {
-        snprintf(buf, sizeof buf, "No vomiting logged yet.");
-    } else {
-        long ago = sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday)
-                 - sched_day_num(v->y, v->mo, v->d);
-        if (ago == 0)
-            snprintf(buf, sizeof buf, "Last vomit: today at %02d:%02d   -   %d in the last 7 days",
-                     v->h, v->mi, v7);
-        else
-            snprintf(buf, sizeof buf, "Last vomit: %ld %s ago   -   %d in the last 7 days",
-                     ago, ago == 1 ? "day" : "days", v7);
-    }
-    lv_label_set_text(lbl_stats, buf);
-
-    /* Calendar: highlight the days she actually got it. */
-    int n = 0;
-    for (int i = n_evts - 1; i >= 0 && n < (int)(sizeof hl_dates / sizeof hl_dates[0]); i--) {
-        if (evts[i].t != 'm') continue;
-        hl_dates[n].year  = (uint16_t)evts[i].y;
-        hl_dates[n].month = (int8_t)evts[i].mo;
-        hl_dates[n].day   = (int8_t)evts[i].d;
-        n++;
-    }
-    lv_calendar_set_today_date(cal, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
-    lv_calendar_set_highlighted_dates(cal, hl_dates, (uint16_t)n);
-
-    /* Recent list, newest first. */
-    size_t off = 0;
-    buf[0] = 0;
-    for (int i = n_evts - 1, shown = 0; i >= 0 && shown < 14; i--, shown++) {
-        off += snprintf(buf + off, sizeof buf - off, "%s %2d   %02d:%02d   %s\n",
-                        MON3[evts[i].mo - 1], evts[i].d, evts[i].h, evts[i].mi,
-                        evts[i].t == 'v' ? "Vomit" : "Medicine");
-        if (off >= sizeof buf) break;
-    }
-    lv_label_set_text(lbl_recent, buf[0] ? buf : "Nothing logged yet.");
+    long today = sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+    refresh_home(&t, today);
+    refresh_calendar(today);
+    refresh_settings(&t);
 }
 
 /* --- entry points --------------------------------------------------- */
@@ -395,52 +775,69 @@ void ui_init(void)
     cfg_load();
     store_load();
 
-    lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(C_BG), 0);
+    struct tm t = now_tm();
+    cal_y = t.tm_year + 1900;
+    cal_m = t.tm_mon + 1;
 
-    lv_obj_t *tv = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, 64);
-    lv_obj_set_style_bg_color(tv, lv_color_hex(C_BG), 0);
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *btns = lv_tabview_get_tab_btns(tv);
-    lv_obj_set_style_text_font(btns, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_bg_color(btns, lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_text_color(btns, lv_color_hex(C_MUTED), 0);
-    lv_obj_set_style_text_color(btns, lv_color_hex(C_TEXT), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_border_color(btns, lv_color_hex(C_GREEN), LV_PART_ITEMS | LV_STATE_CHECKED);
+    build_rail(scr);
 
-    lv_obj_t *t1 = lv_tabview_add_tab(tv, "Today");
-    lv_obj_t *t2 = lv_tabview_add_tab(tv, "Calendar");
-    lv_obj_t *t3 = lv_tabview_add_tab(tv, "Settings");
-    lv_obj_t *tabs[] = { t1, t2, t3 };
     for (int i = 0; i < 3; i++) {
-        lv_obj_set_style_pad_all(tabs[i], 0, 0);
-        lv_obj_clear_flag(tabs[i], LV_OBJ_FLAG_SCROLLABLE);
+        screens[i] = box(scr, BODY_X, PAD, BODY_W, BODY_H, C_BG, 0);
+        lv_obj_set_style_bg_opa(screens[i], LV_OPA_0, 0);
     }
+    build_home(screens[0]);
+    build_calendar(screens[1]);
+    build_settings(screens[2]);
 
-    build_today(t1);
-    build_calendar(t2);
-    build_settings(t3);
-    refresh();
+    lbl_toast = text(scr, 0, 0, "", &lv_font_montserrat_24, C_ACC_ON);
+    lv_obj_set_style_bg_color(lbl_toast, lv_color_hex(C_ACC_FILL), 0);
+    lv_obj_set_style_bg_opa(lbl_toast, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(lbl_toast, 16, 0);
+    lv_obj_set_style_radius(lbl_toast, 14, 0);
+    lv_obj_align(lbl_toast, LV_ALIGN_BOTTOM_MID, RAIL_W / 2, -26);
+    lv_obj_add_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
+
+    show_screen(0);
 }
 
 void ui_tick(void)
 {
     static time_t last_sec;
-    static int last_yday = -1;
+    static int last_yday = -1, dimmed;
 
     time_t now = time(NULL);
     if (now == last_sec) return;             /* the loop runs at ~200Hz; this needs 1Hz */
     last_sec = now;
+    blink_on = !blink_on;
 
     struct tm t = *localtime(&now);
-    char buf[64];
-    snprintf(buf, sizeof buf, "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
-    if (lbl_clock) lv_label_set_text(lbl_clock, buf);
 
-    if (ui_backlight_slider)
-        lv_label_set_text_fmt(lbl_bl_val, "%d%%",
-                              (int)lv_slider_get_value(ui_backlight_slider));
+    if (lbl_toast && toast_until && now >= toast_until) {
+        lv_obj_add_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
+        toast_until = 0;
+    }
 
-    if (t.tm_yday != last_yday) {            /* midnight rollover: today's status changed */
+    /* Idle dimming. lv_disp_get_inactive_time() already tracks the last
+     * input event, so there is nothing to wire up here. */
+    if (dim_min > 0) {
+        int idle = lv_disp_get_inactive_time(NULL) > (uint32_t)dim_min * 60000;
+        if (idle != dimmed) {
+            dimmed = idle;
+            ui_backlight_apply(idle ? 5 : (int)lv_slider_get_value(ui_backlight_slider));
+        }
+    } else if (dimmed) {
+        dimmed = 0;
+        ui_backlight_apply((int)lv_slider_get_value(ui_backlight_slider));
+    }
+
+    if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
+    if (cur_screen == 2) refresh_settings(&t);
+
+    if (t.tm_yday != last_yday) {            /* midnight: today's status changed */
         last_yday = t.tm_yday;
         refresh();
     }

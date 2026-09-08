@@ -167,6 +167,9 @@ static int backlight_get_pct(void)
     return v * 100 / bl_max;
 }
 
+/* src/ui.c dims the panel when the display goes idle. */
+void ui_backlight_apply(int pct) { backlight_set_pct(pct); }
+
 static void backlight_slider_cb(lv_event_t *e)
 {
     backlight_set_pct((int)lv_slider_get_value(lv_event_get_target(e)));

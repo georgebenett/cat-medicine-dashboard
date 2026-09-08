@@ -26,6 +26,39 @@ int main(void)
     assert(sched_next_wday(1 << 2, 2) == 2);/* one day a week: itself, next week */
     assert(sched_next_wday(0, 3) == -1);    /* nothing scheduled */
 
+    /* Weekday. 2026-09-08 is a Tuesday; 1970-01-01 was a Thursday. */
+    assert(sched_wday(sched_day_num(2026, 9, 8)) == 2);
+    assert(sched_wday(sched_day_num(1970, 1, 1)) == 4);
+    assert(sched_wday(sched_day_num(2026, 9, 6)) == 0);   /* Sunday */
+    for (int i = 0; i < 14; i++)                          /* never out of range */
+        assert(sched_wday(sched_day_num(2026, 9, 1) + i) >= 0 &&
+               sched_wday(sched_day_num(2026, 9, 1) + i) <= 6);
+    assert(sched_wday(-1) == 3);                          /* 1969-12-31, a Wednesday */
+
+    /* Weeks run Monday..Sunday. */
+    long mon = sched_day_num(2026, 9, 7);                 /* a Monday */
+    assert(sched_monday(mon) == mon);                     /* Monday maps to itself */
+    assert(sched_monday(sched_day_num(2026, 9, 8)) == mon);
+    assert(sched_monday(sched_day_num(2026, 9, 13)) == mon); /* Sunday belongs to it */
+    assert(sched_monday(sched_day_num(2026, 9, 14)) == mon + 7);
+
+    assert(sched_days_in_month(2026, 2) == 28);
+    assert(sched_days_in_month(2028, 2) == 29);           /* leap */
+    assert(sched_days_in_month(2000, 2) == 29);           /* century leap */
+    assert(sched_days_in_month(1900, 2) == 28);           /* century non-leap */
+    assert(sched_days_in_month(2026, 9) == 30);
+
+    /* sched_civil is the exact inverse of sched_day_num, every day for
+     * eight years across leap years and month ends. */
+    for (long dn = sched_day_num(2024, 1, 1); dn <= sched_day_num(2032, 1, 1); dn++) {
+        int y, m, d;
+        sched_civil(dn, &y, &m, &d);
+        assert(sched_day_num(y, m, d) == dn);
+        assert(m >= 1 && m <= 12 && d >= 1 && d <= sched_days_in_month(y, m));
+    }
+    { int y, m, d; sched_civil(0, &y, &m, &d); assert(y == 1970 && m == 1 && d == 1); }
+    { int y, m, d; sched_civil(-1, &y, &m, &d); assert(y == 1969 && m == 12 && d == 31); }
+
     printf("sched: all checks passed\n");
     return 0;
 }
