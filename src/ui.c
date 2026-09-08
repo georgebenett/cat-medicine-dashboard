@@ -63,7 +63,7 @@ static int   n_evts;
 
 /* Settings, with the defaults the mockup shows. */
 static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fri */
-static char cat_name[32] = "Mimi";
+static char cat_name[64] = "Mimi";   /* sized to match the cfg value buffer */
 static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 
