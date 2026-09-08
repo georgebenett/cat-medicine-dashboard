@@ -453,6 +453,7 @@ static void refresh(void);
 static void toast(const char *msg)
 {
     lv_label_set_text(lbl_toast, msg);
+    lv_obj_align(lbl_toast, LV_ALIGN_BOTTOM_MID, 0, -16);   /* width changed */
     lv_obj_clear_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
     toast_until = time(NULL) + 3;
 }
@@ -1306,12 +1307,11 @@ void ui_init(void)
     build_calendar(screens[1]);
     build_settings(screens[2]);
 
-    lbl_toast = text(scr, 0, 0, "", &lv_font_montserrat_24, C_ACC_ON);
-    lv_obj_set_style_bg_color(lbl_toast, lv_color_hex(C_ACC_FILL), 0);
-    lv_obj_set_style_bg_opa(lbl_toast, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(lbl_toast, 16, 0);
-    lv_obj_set_style_radius(lbl_toast, 16, 0);
-    lv_obj_align(lbl_toast, LV_ALIGN_BOTTOM_MID, RAIL_W / 2, -26);
+    /* Plain white text at the bottom of the screen. It was a blue capsule
+     * at font 24 with 16px padding, which for a three-second confirmation
+     * was shouting. Centred on the screen, not on the content area. */
+    lbl_toast = text(scr, 0, 0, "", &lv_font_montserrat_20, C_TEXT);
+    lv_obj_align(lbl_toast, LV_ALIGN_BOTTOM_MID, 0, -16);
     lv_obj_add_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
 
     /* CAT_SCREEN=0|1|2 picks the screen to open on. Same spirit as
@@ -1319,6 +1319,7 @@ void ui_init(void)
     const char *sc = getenv("CAT_SCREEN");
     show_screen(sc ? atoi(sc) % 3 : 0);
     if (getenv("CAT_POPUP")) lv_obj_clear_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
+    if (getenv("CAT_TOAST")) { toast(getenv("CAT_TOAST")); toast_until = 0; }  /* 0 = stays up */
 
     /* Push the remembered brightness to the panel. Without this a restart
      * while dimmed would leave it at raw 1 with no sign of why. */
