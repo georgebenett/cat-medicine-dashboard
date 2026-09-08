@@ -1142,6 +1142,7 @@ static void refresh_home(const struct tm *t, long today)
                                 lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
     overdue_now = overdue;
     lv_label_set_text_fmt(lbl_week_no, "Week %d", sched_iso_week(today));
+    lv_label_set_text_fmt(lbl_home_clock, "%02d:%02d", t->tm_hour, t->tm_min);
     lv_label_set_text_fmt(lbl_home_date, "%s %d %s",
                           DAY[t->tm_wday], t->tm_mday, MONTH[t->tm_mon]);
 
@@ -1355,13 +1356,9 @@ void ui_tick(void)
         ui_backlight_apply((int)lv_slider_get_value(ui_backlight_slider));
     }
 
-    /* Per second, only the clock and the overdue pulse. refresh_home re-sets
-     * a dozen labels and lv_label_set_text invalidates whether or not the
-     * text actually changed, so running it every second was repainting most
-     * of the screen to display the same thing. Minute granularity is enough
-     * for everything else - the reminder fires on a minute boundary. */
-    if (lbl_home_clock)
-        lv_label_set_text_fmt(lbl_home_clock, "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
+    /* Without seconds nothing on screen changes faster than once a minute,
+     * so the only per-second work left is the overdue pulse. The clock is
+     * set in refresh_home along with everything else. */
     if (status_dot && overdue_now)
         lv_obj_set_style_bg_opa(status_dot, blink_on ? LV_OPA_COVER : LV_OPA_30, 0);
 
