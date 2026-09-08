@@ -148,8 +148,9 @@ LVGL itself is not vendored (125MB); `setup.sh` fetches it. `lv_conf.h`
 - **Objects depend on `lv_conf.h`** in the Makefile. It reshapes LVGL's
   structs, and stale `.o` files link fine and then misbehave.
 
-`CAT_SCREEN=0|1|2` opens on Today, Calendar or Settings - handy for
-looking at a screen over ssh without touching the panel.
+`CAT_SCREEN=0|1|2` opens on Today, Calendar or Settings, and `CAT_POPUP=1`
+opens the Log event sheet - handy for looking at either over ssh without
+touching the panel.
 
 Calibration knobs, no rebuild needed: `TOUCH_SWAP`, `TOUCH_INVX`,
 `TOUCH_INVY`, `TOUCH_CURSOR=1` (red dot), `TOUCH_DEBUG=1` (coords to stderr).
