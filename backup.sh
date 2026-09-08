@@ -16,11 +16,12 @@ if [ ! -d "$REPO/.git" ]; then
     exit 1
 fi
 
-# Nothing to do before she has any history; not an error.
-[ -f cat_log.csv ] || { echo "no cat_log.csv yet"; exit 0; }
-
-cp -f cat_log.csv "$REPO/cat_log.csv"
-[ -f cat_cfg.txt ] && cp -f cat_cfg.txt "$REPO/cat_cfg.txt"
+# Back up whatever exists. A missing log is not an error - it just means
+# nothing has been logged yet, or it was reset.
+copied=0
+[ -f cat_log.csv ] && { cp -f cat_log.csv "$REPO/cat_log.csv"; copied=1; }
+[ -f cat_cfg.txt ] && { cp -f cat_cfg.txt "$REPO/cat_cfg.txt"; copied=1; }
+[ "$copied" = 1 ] || { echo "nothing to back up yet"; exit 0; }
 
 cd "$REPO"
 git add -A
@@ -30,7 +31,7 @@ if git diff --cached --quiet; then
     exit 0
 fi
 
-n=$(grep -c . cat_log.csv 2>/dev/null || echo 0)
+n=$(grep -c . cat_log.csv 2>/dev/null || true); n=${n:-0}
 git commit -q -m "$(date '+%Y-%m-%d %H:%M') - $n events"
 
 # Don't let a wifi drop fail the unit: the next run picks it up, and the
