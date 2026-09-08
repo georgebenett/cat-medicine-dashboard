@@ -80,8 +80,8 @@ static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 70;                          /* remembered across restarts */
 static int  photo_secs = 60;                             /* portrait shuffle interval */
-static char cfg_lat[16] = "55.6078";                     /* weather.py reads these */
-static char cfg_lon[16] = "12.9982";
+static char cfg_lat[32] = "55.6078";   /* sized to the cfg value buffer */
+static char cfg_lon[32] = "12.9982";   /* weather.py reads both */
 
 static const char *env_or(const char *var, const char *dflt)
 {
