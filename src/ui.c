@@ -10,6 +10,7 @@
  * Override the paths with $CAT_LOG / $CAT_CFG, the photo with $CAT_IMG.
  */
 #include "ui.h"
+#include "sched.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,15 +107,6 @@ static const char *MON3[]  = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 
 static struct tm now_tm(void) { time_t n = time(NULL); return *localtime(&n); }
 
-/* Days since the epoch. Noon avoids the DST hour shifting the answer. */
-static long day_num(int y, int mo, int d)
-{
-    struct tm t = { 0 };
-    t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d; t.tm_hour = 12;
-    t.tm_isdst = -1;
-    return (long)(mktime(&t) / 86400);
-}
-
 /* Latest medicine event today, or NULL. */
 static const evt_t *med_today(const struct tm *t)
 {
@@ -133,22 +125,11 @@ static const evt_t *last_vomit(void)
 
 static int vomits_last_7d(const struct tm *t)
 {
-    long today = day_num(t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+    long today = sched_day_num(t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
     int n = 0;
     for (int i = 0; i < n_evts; i++)
-        if (evts[i].t == 'v' && today - day_num(evts[i].y, evts[i].mo, evts[i].d) < 7) n++;
+        if (evts[i].t == 'v' && today - sched_day_num(evts[i].y, evts[i].mo, evts[i].d) < 7) n++;
     return n;
-}
-
-/* Weekday of the next scheduled dose after today, or -1 if nothing is set. */
-static int next_med_wday(int wday)
-{
-    if (!med_mask) return -1;
-    for (int i = 1; i <= 7; i++) {
-        int w = (wday + i) % 7;
-        if (med_mask & (1 << w)) return w;
-    }
-    return -1;
 }
 
 /* --- widgets -------------------------------------------------------- */
@@ -352,7 +333,7 @@ static void refresh(void)
     } else {
         lv_label_set_text(lbl_status, "No medicine today");
         lv_obj_set_style_text_color(lbl_status, lv_color_hex(C_MUTED), 0);
-        int nx = next_med_wday(t.tm_wday);
+        int nx = sched_next_wday(med_mask, t.tm_wday);
         if (nx >= 0) snprintf(buf, sizeof buf, "Next dose: %s.", DAY[nx]);
         else         snprintf(buf, sizeof buf, "No days scheduled - set them in Settings.");
     }
@@ -369,15 +350,17 @@ static void refresh(void)
 
     const evt_t *v = last_vomit();
     int v7 = vomits_last_7d(&t);
-    if (v) {
-        long ago = day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday) - day_num(v->y, v->mo, v->d);
-        snprintf(buf, sizeof buf, "Last vomit: %s (%ld %s ago)   -   %d in the last 7 days",
-                 ago == 0 ? "today" : "", ago, ago == 1 ? "day" : "days", v7);
+    if (!v) {
+        snprintf(buf, sizeof buf, "No vomiting logged yet.");
+    } else {
+        long ago = sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday)
+                 - sched_day_num(v->y, v->mo, v->d);
         if (ago == 0)
             snprintf(buf, sizeof buf, "Last vomit: today at %02d:%02d   -   %d in the last 7 days",
                      v->h, v->mi, v7);
-    } else {
-        snprintf(buf, sizeof buf, "No vomiting logged yet.");
+        else
+            snprintf(buf, sizeof buf, "Last vomit: %ld %s ago   -   %d in the last 7 days",
+                     ago, ago == 1 ? "day" : "days", v7);
     }
     lv_label_set_text(lbl_stats, buf);
 
