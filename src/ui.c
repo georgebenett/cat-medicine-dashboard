@@ -64,7 +64,7 @@ static int   n_evts;
 /* Settings, with the defaults the mockup shows. */
 static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fri */
 static char cat_name[32] = "Mimi";
-static int  dim_min = 10;                                /* 0 = never dim */
+static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 
 static const char *env_or(const char *var, const char *dflt)
@@ -109,6 +109,25 @@ static void store_append(char t)
         perror("cat log append");
     }
     if (n_evts < MAX_EVTS) evts[n_evts++] = e;
+}
+
+/* Rewrites the whole file. The log is a few hundred lines at most, so
+ * this is simpler than trying to edit a line out in place. */
+static void store_rewrite(void)
+{
+    FILE *f = fopen(log_path(), "w");
+    if (!f) { perror("cat log rewrite"); return; }
+    for (int i = 0; i < n_evts; i++)
+        fprintf(f, "%04d-%02d-%02dT%02d:%02d,%s\n", evts[i].y, evts[i].mo, evts[i].d,
+                evts[i].h, evts[i].mi, evts[i].t == 'v' ? "vomit" : "med");
+    fclose(f);
+}
+
+static void store_clear_all(void)
+{
+    n_evts = 0;
+    if (remove(log_path()) != 0 && access(log_path(), F_OK) == 0)
+        perror("cat log remove");
 }
 
 static void cfg_load(void)
@@ -157,6 +176,9 @@ static struct tm now_tm(void) { time_t n = time(NULL); return *localtime(&n); }
 static long evt_day(const evt_t *e) { return sched_day_num(e->y, e->mo, e->d); }
 static long today_num(void) { struct tm t = now_tm(); return sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday); }
 
+/* Drop every event of kind `t` on day `dn` - the undo for a mistaken tap. */
+static void store_remove_day(long dn, char t);
+
 static int scheduled_per_week(void)
 {
     int n = 0;
@@ -186,6 +208,15 @@ static int count_between(long from, long to, char t)   /* inclusive */
         if (evts[i].t == t && d >= from && d <= to) n++;
     }
     return n;
+}
+
+static void store_remove_day(long dn, char t)
+{
+    int w = 0;
+    for (int i = 0; i < n_evts; i++)
+        if (!(evts[i].t == t && evt_day(&evts[i]) == dn)) evts[w++] = evts[i];
+    n_evts = w;
+    store_rewrite();
 }
 
 /* Consecutive fully-complete weeks before the current one: every scheduled
@@ -315,7 +346,14 @@ static void show_screen(int i)
 }
 
 static void rail_cb(lv_event_t *e)   { show_screen((int)(intptr_t)lv_event_get_user_data(e)); }
-static void dose_cb(lv_event_t *e)   { (void)e; store_append('m'); toast("Dose logged"); refresh(); }
+static void dose_cb(lv_event_t *e)
+{
+    (void)e;
+    long today = today_num();
+    if (evt_on_day(today, 'm')) { store_remove_day(today, 'm'); toast("Today's dose cleared"); }
+    else                        { store_append('m');            toast("Dose logged"); }
+    refresh();
+}
 static void event_cb(lv_event_t *e)  { (void)e; store_append('v'); toast("Event logged"); refresh(); }
 
 static void cal_step_cb(lv_event_t *e)
@@ -345,6 +383,32 @@ static void reminder_cb(lv_event_t *e)
     reminder_on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
     cfg_save();
     refresh();
+}
+
+static void reset_confirm_cb(lv_event_t *e)
+{
+    lv_obj_t *mb = lv_event_get_current_target(e);
+    if (lv_msgbox_get_active_btn(mb) == 0) {
+        store_clear_all();
+        toast("All logged data cleared");
+        refresh();
+    }
+    lv_msgbox_close(mb);
+}
+
+static void reset_cb(lv_event_t *e)
+{
+    (void)e;
+    static const char *btns[] = { "Delete everything", "Cancel", "" };
+    lv_obj_t *mb = lv_msgbox_create(NULL, "Reset data",
+                                    "Deletes every logged dose and event.\n"
+                                    "Settings and the schedule are kept.\n"
+                                    "This cannot be undone.", btns, false);
+    lv_obj_set_style_text_font(mb, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
+    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
+    lv_obj_add_event_cb(mb, reset_confirm_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(mb);
 }
 
 /* The log is already a CSV; "export" just drops a dated copy beside it that
@@ -534,11 +598,13 @@ static lv_obj_t *settings_row(lv_obj_t *s, int y, int h, const char *icon, const
 static void build_settings(lv_obj_t *s)
 {
     const int RH = 104, RY = 118, VX = 300;
+    const int SLD_W = 380, SLD_H = 12;      /* the first pass was full-width and 26 thick */
 
     lv_obj_t *r = settings_row(s, 0, RH, LV_SYMBOL_EYE_OPEN, "Backlight");
     ui_backlight_slider = lv_slider_create(r);
-    lv_obj_set_size(ui_backlight_slider, BODY_W - VX - 160, 26);
+    lv_obj_set_size(ui_backlight_slider, SLD_W, SLD_H);
     lv_obj_align(ui_backlight_slider, LV_ALIGN_LEFT_MID, VX, 0);
+    lv_obj_set_style_pad_all(ui_backlight_slider, 8, LV_PART_KNOB);
     lv_slider_set_range(ui_backlight_slider, 5, 100);
     lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
@@ -547,8 +613,9 @@ static void build_settings(lv_obj_t *s)
 
     r = settings_row(s, RY, RH, LV_SYMBOL_POWER, "Dim after");
     sld_dim = lv_slider_create(r);
-    lv_obj_set_size(sld_dim, BODY_W - VX - 160, 26);
+    lv_obj_set_size(sld_dim, SLD_W, SLD_H);
     lv_obj_align(sld_dim, LV_ALIGN_LEFT_MID, VX, 0);
+    lv_obj_set_style_pad_all(sld_dim, 8, LV_PART_KNOB);
     lv_slider_set_range(sld_dim, 0, 30);
     lv_slider_set_value(sld_dim, dim_min, LV_ANIM_OFF);
     lv_obj_add_event_cb(sld_dim, dim_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -581,6 +648,16 @@ static void build_settings(lv_obj_t *s)
     lv_obj_add_event_cb(sw_reminder, reminder_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     lbl_footer = text(s, 0, BODY_H - 46, "", &lv_font_montserrat_22, C_TEXT2);
+    lv_obj_t *rs = lv_btn_create(s);
+    lv_obj_set_size(rs, 210, 62);
+    lv_obj_set_pos(rs, BODY_W - 230 - 226, BODY_H - 62);
+    lv_obj_set_style_bg_opa(rs, LV_OPA_0, 0);
+    lv_obj_set_style_border_color(rs, lv_color_hex(C_BAD_FILL), 0);
+    lv_obj_set_style_border_width(rs, 2, 0);
+    lv_obj_set_style_radius(rs, 18, 0);
+    lv_obj_add_event_cb(rs, reset_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_center(text(rs, 0, 0, LV_SYMBOL_TRASH "  Reset data", &lv_font_montserrat_22, C_BAD_TEXT));
+
     lv_obj_t *ex = lv_btn_create(s);
     lv_obj_set_size(ex, 230, 62);
     lv_obj_set_pos(ex, BODY_W - 230, BODY_H - 62);
@@ -653,12 +730,19 @@ static void refresh_home(const struct tm *t, long today)
     lv_obj_set_style_text_color(lbl_status,     lv_color_hex(overdue && blink_on ? C_BAD_BG : fg), 0);
     lv_obj_set_style_text_color(lbl_status_sub, lv_color_hex(overdue && blink_on ? C_BAD_BG : fg), 0);
 
+    /* Stays tappable once logged: tapping again clears today's dose, which
+     * is the only way to take back a mis-tap. */
     if (given) {
-        lv_obj_add_state(btn_dose, LV_STATE_DISABLED);
-        lv_label_set_text(lbl_btn_dose, LV_SYMBOL_OK "  Already logged");
+        lv_obj_set_style_bg_opa(btn_dose, LV_OPA_0, 0);
+        lv_obj_set_style_border_color(btn_dose, lv_color_hex(C_BORDER_ST), 0);
+        lv_obj_set_style_border_width(btn_dose, 2, 0);
+        lv_label_set_text(lbl_btn_dose, LV_SYMBOL_REFRESH "  Undo today's dose");
+        lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_TEXT2), 0);
     } else {
-        lv_obj_clear_state(btn_dose, LV_STATE_DISABLED);
+        lv_obj_set_style_bg_opa(btn_dose, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(btn_dose, 0, 0);
         lv_label_set_text(lbl_btn_dose, LV_SYMBOL_OK "  Log dose given");
+        lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_ACC_ON), 0);
     }
 
     for (int i = 0; i < 7; i++) {
@@ -827,7 +911,7 @@ void ui_tick(void)
         int idle = lv_disp_get_inactive_time(NULL) > (uint32_t)dim_min * 60000;
         if (idle != dimmed) {
             dimmed = idle;
-            ui_backlight_apply(idle ? 5 : (int)lv_slider_get_value(ui_backlight_slider));
+            ui_backlight_apply(idle ? 0 : (int)lv_slider_get_value(ui_backlight_slider));
         }
     } else if (dimmed) {
         dimmed = 0;

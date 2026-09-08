@@ -4,13 +4,21 @@ A medicine tracker for the cat, on a Raspberry Pi 3A+ with a Waveshare
 9" DSI touch panel (720x1280 portrait, used as 1280x720 landscape).
 LVGL 8.3, hand-written C, no UI builder.
 
-## Tabs
+## Screens
 
-- **Today** - her photo, whether today is a medicine day, a button to
-  log the dose (greys out once logged, so a double tap can't
-  double-log), a button to log vomiting, and how the week has gone.
-- **Calendar** - every day the medicine was actually given, highlighted.
-- **Settings** - backlight slider, and which weekdays are medicine days.
+Navigation is a left icon rail - home, calendar, gear - not a tab bar.
+
+- **Today** - her photo and name, whether today is a medicine day, the
+  dose count for the week, a Mon..Sun strip, and buttons to log a dose or
+  an event. Once a dose is logged the button becomes "Undo today's dose":
+  that is the only way to take back a mis-tap.
+- **Calendar** - a month grid, green for a dose and red for an event,
+  with month/streak/event stats and a recent list.
+- **Settings** - backlight, idle dim, which weekdays are medicine days,
+  a reminder toggle, and buttons to export or reset the log.
+
+Reset data deletes every logged dose and event after a confirmation.
+Settings and the schedule survive it.
 
 ## State
 
@@ -20,10 +28,21 @@ are readable and editable without this app, and both are gitignored
 
     cat_log.csv    2026-09-08T19:47,med      append-only, one event per line
                    2026-09-07T22:03,vomit
-    cat_cfg.txt    42                        medicine-day bitmask, bit0=Sunday
+    cat_cfg.txt    days=42                   medicine-day bitmask, bit0=Sunday
+                   name=Mimi
+                   dim=5                     idle minutes before dimming, 0=never
+                   reminder=1                flash the status card when overdue
+                   reminder_h=9              reminder time; no picker in the UI
+                   reminder_m=0
 
 Default schedule is Mon/Wed/Fri - three a week. Change it in Settings,
-not in the source.
+not in the source. A bare integer in cat_cfg.txt is still read as the day
+mask, which is what the first version of this file held.
+
+Idle dimming uses LVGL's own `lv_disp_get_inactive_time()`. It drops the
+panel to the dimmest the hardware will go while still lit - deliberately
+below the `BL_MIN_PCT` floor that keeps the slider visible - and restores
+the slider's brightness on the next touch.
 
 Paths are overridable: `CAT_LOG`, `CAT_CFG`, `CAT_IMG`.
 

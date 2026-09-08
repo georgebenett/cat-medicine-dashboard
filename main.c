@@ -147,15 +147,22 @@ static void backlight_find(void)
     globfree(&g);
 }
 
-static void backlight_set_pct(int pct)
+static void backlight_set_raw(int v)
 {
     if (!bl_path[0] || bl_max <= 0) return;
-    if (pct < BL_MIN_PCT) pct = BL_MIN_PCT;
-    if (pct > 100) pct = 100;
+    if (v < 1) v = 1;
+    if (v > bl_max) v = bl_max;
     FILE *f = fopen(bl_path, "w");
     if (!f) { perror("backlight write"); return; }
-    fprintf(f, "%d\n", pct * bl_max / 100);
+    fprintf(f, "%d\n", v);
     fclose(f);
+}
+
+static void backlight_set_pct(int pct)
+{
+    if (pct < BL_MIN_PCT) pct = BL_MIN_PCT;
+    if (pct > 100) pct = 100;
+    backlight_set_raw(pct * bl_max / 100);
 }
 
 static int backlight_get_pct(void)
@@ -167,8 +174,14 @@ static int backlight_get_pct(void)
     return v * 100 / bl_max;
 }
 
-/* src/ui.c dims the panel when the display goes idle. */
-void ui_backlight_apply(int pct) { backlight_set_pct(pct); }
+/* src/ui.c dims the panel when the display goes idle. pct <= 0 means the
+ * dimmest the panel will go while still lit, deliberately below the
+ * BL_MIN_PCT floor that keeps the slider usable. */
+void ui_backlight_apply(int pct)
+{
+    if (pct <= 0) backlight_set_raw(1);
+    else          backlight_set_pct(pct);
+}
 
 static void backlight_slider_cb(lv_event_t *e)
 {
