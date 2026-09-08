@@ -1,6 +1,6 @@
 /* Minimal LVGL 8.3 harness: Waveshare 9" DSI panel (fbdev) + Goodix touch (evdev).
  *
- * The panel is physically 720x1280 portrait. The EEZ UI is 1280x720 landscape,
+ * The panel is physically 720x1280 portrait. The UI is 1280x720 landscape,
  * so LVGL rotates in software: we hand LVGL the NATIVE size and set ROT_90,
  * and lv_disp_get_hor_res() then reports 1280x720 to the UI code.
  *
@@ -21,8 +21,7 @@
 #include <linux/input.h>
 #include <glob.h>
 #include <lvgl/lvgl.h>
-#include "ui/ui.h"
-#include "ui/screens.h"
+#include "src/ui.h"
 
 #define FB_DEV     "/dev/fb0"
 
@@ -243,12 +242,11 @@ int main(void)
 
     ui_init();
 
-    /* Wire the EEZ slider to the backlight HERE, not in src/ui/: EEZ Studio
-     * regenerates screens.c and would overwrite anything added there. */
+    /* The sysfs backlight lives here; src/ui.c only owns the slider widget. */
     backlight_find();
-    if (objects.backlight_slider) {
-        lv_slider_set_value(objects.backlight_slider, backlight_get_pct(), LV_ANIM_OFF);
-        lv_obj_add_event_cb(objects.backlight_slider, backlight_slider_cb,
+    if (ui_backlight_slider) {
+        lv_slider_set_value(ui_backlight_slider, backlight_get_pct(), LV_ANIM_OFF);
+        lv_obj_add_event_cb(ui_backlight_slider, backlight_slider_cb,
                             LV_EVENT_VALUE_CHANGED, NULL);
         printf("backlight slider wired (currently %d%%)\n", backlight_get_pct());
     }

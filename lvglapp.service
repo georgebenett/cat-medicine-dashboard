@@ -1,9 +1,10 @@
 [Unit]
-Description=LVGL UI (EEZ) on the Waveshare 9" DSI panel
+Description=Cat medicine dashboard on the Waveshare 9" DSI panel
 After=multi-user.target
 
 [Service]
 Type=simple
+WorkingDirectory=/home/georges/lvgl_app
 ExecStart=/home/georges/lvgl_app/app
 Restart=always
 RestartSec=3

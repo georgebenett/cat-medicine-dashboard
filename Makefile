@@ -10,12 +10,16 @@ LDFLAGS  := -lm -lpthread
 
 include $(LVGL_DIR)/lvgl/lvgl.mk
 
-CSRCS   += main.c $(wildcard src/ui/*.c)
-CXXSRCS := $(wildcard src/ui/*.cpp)
+CSRCS   += main.c $(wildcard src/*.c)
+CXXSRCS := $(wildcard src/*.cpp)
 
 COBJS   := $(CSRCS:.c=.o)
 CXXOBJS := $(CXXSRCS:.cpp=.o)
 OBJS    := $(COBJS) $(CXXOBJS)
+
+# lv_conf.h changes the layout of half of LVGL's structs. Without this the
+# stale .o files link fine and then misbehave at runtime.
+$(OBJS): lv_conf.h
 
 app: $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LDFLAGS)
