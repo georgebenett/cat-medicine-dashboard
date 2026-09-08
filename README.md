@@ -86,6 +86,21 @@ to change it.
 `photos/` and `cat.png` are gitignored: they are personal and this repo
 has a public remote. Copy them over with scp instead.
 
+## Power
+
+This Pi browns out. `vcgencmd get_throttled` returns `0x50000`: bit 16
+(under-voltage has occurred) and bit 18 (throttling has occurred), and it
+logs `Undervoltage detected!` repeatedly. It rebooted on its own twice on
+2026-09-08, roughly three hours apart.
+
+That is the cause of most apparent "wifi drops" - the machine is
+power-cycling, not losing its association. `cat-wifi.timer` is a safety
+net for a genuinely wedged link, not a fix for this. **Replace the supply
+or the cable.**
+
+Unexpected reboots also corrupt SD cards, which is why `cat_log.csv` is
+backed up off the device.
+
 ## Weather
 
 `weather.py` fetches from Open-Meteo (no API key) into `weather.txt`,
@@ -103,6 +118,16 @@ than three hours is greyed out so stale numbers are not shown as current.
 
 Icons are PNGs (`wx_*.png`), five of them, with the WMO codes collapsed
 onto those five in `wx_icon_file()`.
+
+## Wifi watchdog
+
+`wifi_watchdog.sh` pings the default gateway every two minutes via
+`cat-wifi.timer` and bounces the connection if it cannot be reached. It
+finds the connection by type rather than by SSID.
+
+NetworkManager is already `autoconnect=yes` with `autoconnect-retries=0`
+(forever), so this only covers the case where the supplicant is wedged
+rather than retrying. Check it with `journalctl -t wifi-watchdog`.
 
 ## Backing up the log
 

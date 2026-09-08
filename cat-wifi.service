@@ -1,0 +1,7 @@
+[Unit]
+Description=Reconnect wifi if the link is down
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/georges/lvgl_app/wifi_watchdog.sh
