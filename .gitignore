@@ -6,9 +6,6 @@ lvgl/
 app
 *.log
 
-# EEZ Studio per-machine editor state
-*.eez-project-ui-state
-
 # device state, written by the app
 cat_log.csv
 cat_cfg.txt
