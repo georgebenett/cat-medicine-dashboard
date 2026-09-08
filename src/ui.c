@@ -369,6 +369,41 @@ static void dose_cb(lv_event_t *e)
     else                        { store_append('m');            toast("Dose logged"); }
     refresh();
 }
+/* lv_msgbox defaults to LV_DPI_DEF*2 = 260px wide with 86px buttons. On a
+ * 1280px panel with 24pt text that clips the labels ("Vomiting" alone is
+ * wider than its button), so every dialog gets sized explicitly. */
+static lv_obj_t *dialog(const char *title, const char *body,
+                        const char **btns, lv_event_cb_t cb)
+{
+    lv_obj_t *mb = lv_msgbox_create(NULL, title, body, btns, false);
+    lv_obj_set_width(mb, 780);
+    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
+    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
+    lv_obj_set_style_text_font(mb, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_border_width(mb, 0, 0);
+    lv_obj_set_style_radius(mb, 22, 0);
+    lv_obj_set_style_pad_all(mb, 28, 0);
+
+    lv_obj_t *t = lv_msgbox_get_title(mb);
+    if (t) lv_obj_set_style_text_font(t, &lv_font_montserrat_32, 0);
+
+    lv_obj_t *b = lv_msgbox_get_btns(mb);
+    if (b) {
+        lv_obj_set_size(b, 724, 78);
+        lv_obj_set_style_text_font(b, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(b, 0, 0);
+        lv_obj_set_style_pad_column(b, 14, 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(C_ACC_BG), LV_PART_ITEMS);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(b, lv_color_hex(C_TEXT), LV_PART_ITEMS);
+        lv_obj_set_style_radius(b, 14, LV_PART_ITEMS);
+    }
+    lv_obj_add_event_cb(mb, cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(mb);
+    return mb;
+}
+
 static void event_choice_cb(lv_event_t *e)
 {
     lv_obj_t *mb = lv_event_get_current_target(e);
@@ -384,12 +419,7 @@ static void event_cb(lv_event_t *e)
 {
     (void)e;
     static const char *btns[] = { "Vomiting", "Food", "Cancel", "" };
-    lv_obj_t *mb = lv_msgbox_create(NULL, "Log event", "What happened?", btns, false);
-    lv_obj_set_style_text_font(mb, &lv_font_montserrat_26, 0);
-    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
-    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
-    lv_obj_add_event_cb(mb, event_choice_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_center(mb);
+    dialog("Log event", "What happened?", btns, event_choice_cb);
 }
 
 static void cal_step_cb(lv_event_t *e)
@@ -453,16 +483,10 @@ static void exit_cb(lv_event_t *e)
 {
     (void)e;
     static const char *btns[] = { "Quit to shell", "Cancel", "" };
-    lv_obj_t *mb = lv_msgbox_create(NULL, "Exit dashboard",
-                                    "Stops the dashboard and puts the console\n"
-                                    "back on the panel.\n"
-                                    "Start it again with:  sudo systemctl start lvglapp",
-                                    btns, false);
-    lv_obj_set_style_text_font(mb, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
-    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
-    lv_obj_add_event_cb(mb, exit_confirm_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_center(mb);
+    dialog("Exit dashboard",
+           "Stops the dashboard and puts the console back on the panel.\n"
+           "Start it again with:  sudo systemctl start lvglapp",
+           btns, exit_confirm_cb);
 }
 
 static void reset_confirm_cb(lv_event_t *e)
@@ -480,15 +504,10 @@ static void reset_cb(lv_event_t *e)
 {
     (void)e;
     static const char *btns[] = { "Delete everything", "Cancel", "" };
-    lv_obj_t *mb = lv_msgbox_create(NULL, "Reset data",
-                                    "Deletes every logged dose and event.\n"
-                                    "Settings and the schedule are kept.\n"
-                                    "This cannot be undone.", btns, false);
-    lv_obj_set_style_text_font(mb, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
-    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
-    lv_obj_add_event_cb(mb, reset_confirm_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_center(mb);
+    dialog("Reset data",
+           "Deletes every logged dose and event.\n"
+           "Settings and the schedule are kept. This cannot be undone.",
+           btns, reset_confirm_cb);
 }
 
 /* The log is already a CSV; "export" just drops a dated copy beside it that
