@@ -5,6 +5,17 @@ After=multi-user.target
 [Service]
 Type=simple
 WorkingDirectory=/home/georges/lvgl_app
+
+# Take the kernel's framebuffer console off /dev/fb0 for as long as the
+# dashboard owns the panel. console=tty1 on the kernel cmdline means every
+# kernel message and anything typed on the Pi's own console is drawn into
+# the same framebuffer, on top of the UI - and because LVGL only repaints
+# dirty regions, whatever the console scribbled stays there.
+# Found by name: vtcon0/vtcon1 is not a fixed assignment. Leading `-` so a
+# board without fbcon still starts. dirname avoids a literal % in the unit.
+ExecStartPre=-/bin/sh -c 'p=$$(grep -l "frame buffer device" /sys/class/vtconsole/*/name | head -1); [ -n "$$p" ] && echo 0 > "$$(dirname "$$p")/bind"'
+ExecStopPost=-/bin/sh -c 'p=$$(grep -l "frame buffer device" /sys/class/vtconsole/*/name | head -1); [ -n "$$p" ] && echo 1 > "$$(dirname "$$p")/bind"'
+
 ExecStart=/home/georges/lvgl_app/app
 Restart=always
 RestartSec=3
