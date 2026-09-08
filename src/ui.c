@@ -421,6 +421,18 @@ static lv_obj_t *dialog(const char *title, const char *body,
                         const char **btns, lv_event_cb_t cb)
 {
     lv_obj_t *mb = lv_msgbox_create(NULL, title, body, btns, false);
+
+    /* The backdrop defaults to translucent black, which forces every widget
+     * underneath to be redrawn and alpha-blended - the most expensive thing
+     * this UI can ask for, and the reason the dialog crawled down the screen.
+     * Opaque lets LVGL's cover check skip them entirely, and over a black
+     * ground it looks the same. */
+    lv_obj_t *bg = lv_obj_get_parent(mb);
+    if (bg) {
+        lv_obj_set_style_bg_color(bg, lv_color_hex(C_BG), 0);
+        lv_obj_set_style_bg_opa(bg, LV_OPA_COVER, 0);
+    }
+
     lv_obj_set_width(mb, 780);
     lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
     lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
@@ -662,7 +674,10 @@ static void photo_show(int i)
         int zoom = zx < zy ? zx : zy;
         if (zoom > 256) zoom = 256;      /* never upscale, it would just blur */
         if (zoom < 16)  zoom = 16;
+        /* At exactly 256 lv_img takes its plain blit path and skips the
+         * transform entirely, so the photos are pre-scaled to land here. */
         lv_img_set_zoom(photo_img, (uint16_t)zoom);
+        if (zoom != 256) printf("photo %d: zoom %d, transforming every draw\n", i, zoom);
 
         /* Round the picture's own corners. clip_corner masks an object's
          * CHILDREN, so the mask has to live on a wrapper sized to the drawn

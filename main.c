@@ -184,8 +184,13 @@ static uint32_t millis(void)
 /* Partial buffers, sized in LOGICAL (post-rotation) width.
  * NOT full_refresh: LVGL 8.3 refuses to software-rotate a full-refresh
  * display ("cannot rotate a full refreshed display!") and silently skips
- * flush_cb entirely, leaving the panel showing whatever was there before. */
-#define DRAW_LINES 40
+ * flush_cb entirely, leaving the panel showing whatever was there before.
+ *
+ * 240 rows, not 40. lv_refr.c rotates in chunks of LV_DISP_ROT_MAX_BUF and
+ * flushes after each, so the two have to be raised together - at 40 rows
+ * and a 10KB rotate buffer a full redraw was 180 rotate+flush passes, which
+ * is exactly the top-to-bottom wipe you could watch happen. Now 3. */
+#define DRAW_LINES 240
 static lv_color_t draw_buf_1[PANEL_H * DRAW_LINES];
 static lv_color_t draw_buf_2[PANEL_H * DRAW_LINES];
 
