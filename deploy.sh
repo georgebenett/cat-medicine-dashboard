@@ -2,7 +2,15 @@
 # Run on the Pi: pull, rebuild, (re)install the service, restart.
 set -e
 cd "$(dirname "$0")"
-git pull --ff-only
+# Not fatal. This Pi's wifi drops, and being unable to restart the panel
+# because github is unreachable is worse than deploying what is already
+# checked out - so say plainly which commit is going on, and carry on.
+if ! git pull --ff-only; then
+    echo
+    echo "WARNING: could not reach the remote. Deploying what is checked out:"
+    git log --oneline -1
+    echo
+fi
 
 # Installing the unit and restarting need root. Ask for it up front: over a
 # non-interactive ssh there is no tty to type into, and the `|| true` on the
