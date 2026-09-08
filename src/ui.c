@@ -472,7 +472,6 @@ static void pop_pick_cb(lv_event_t *e)
 {
     char t = (char)(intptr_t)lv_event_get_user_data(e);
     lv_obj_add_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
-    if (!t) return;                                   /* Cancel */
     store_append(t);
     toast(t == 'v' ? "Vomiting logged" : "Food logged");
     refresh();
@@ -481,9 +480,9 @@ static void pop_pick_cb(lv_event_t *e)
 static void event_cb(lv_event_t *e)
 {
     (void)e;
-    /* Tapping the button again closes it - there is no full-screen catcher
-     * to dismiss on an outside tap, because showing one would invalidate the
-     * whole screen and cost exactly what this change is avoiding. */
+    /* Tapping the button again closes it, which is why there is no Cancel
+     * row and no full-screen tap-catcher - a catcher would invalidate the
+     * whole screen, which is the cost this change exists to avoid. */
     if (lv_obj_has_flag(pop_event, LV_OBJ_FLAG_HIDDEN))
         lv_obj_clear_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
     else
@@ -826,15 +825,14 @@ static void build_event_popover(void)
 {
     const int x = BODY_X + RIGHT_X + BTN_W + 22;
     const int y = PAD + 182 + 120 + 10;
-    pop_event = box(lv_layer_top(), x, y, POP_W, 3 * POP_RH + 16, C_BORDER_ST, 18);
+    pop_event = box(lv_layer_top(), x, y, POP_W, 2 * POP_RH + 16, C_BORDER_ST, 18);
     lv_obj_set_style_pad_all(pop_event, 8, 0);
     lv_obj_set_style_border_width(pop_event, 1, 0);
     lv_obj_set_style_border_color(pop_event, lv_color_hex(C_BORDER), 0);
     lv_obj_add_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
 
-    pop_row(0, 3, LV_SYMBOL_WARNING, "Vomiting", C_BAD_TEXT, 'v');
-    pop_row(1, 3, LV_SYMBOL_PLUS,    "Food",     C_TEXT,     'f');
-    pop_row(2, 3, LV_SYMBOL_CLOSE,   "Cancel",   C_TEXT2,     0);
+    pop_row(0, 2, LV_SYMBOL_WARNING, "Vomiting", C_BAD_TEXT, 'v');
+    pop_row(1, 2, LV_SYMBOL_PLUS,    "Food",     C_TEXT,     'f');
 }
 
 static void build_calendar(lv_obj_t *s)
