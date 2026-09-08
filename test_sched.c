@@ -59,6 +59,21 @@ int main(void)
     { int y, m, d; sched_civil(0, &y, &m, &d); assert(y == 1970 && m == 1 && d == 1); }
     { int y, m, d; sched_civil(-1, &y, &m, &d); assert(y == 1969 && m == 12 && d == 31); }
 
+    /* ISO weeks. The year-boundary cases are the ones that catch a naive
+     * "days since Jan 1 over 7" implementation. */
+    assert(sched_iso_week(sched_day_num(2026, 9, 8))  == 37);
+    assert(sched_iso_week(sched_day_num(2026, 1, 1))  == 1);   /* a Thursday */
+    assert(sched_iso_week(sched_day_num(2025, 12, 29)) == 1);  /* Mon, belongs to 2026 */
+    assert(sched_iso_week(sched_day_num(2026, 12, 31)) == 53); /* 2026 has 53 weeks */
+    assert(sched_iso_week(sched_day_num(2027, 1, 1))  == 53);  /* Fri, still 2026 w53 */
+    assert(sched_iso_week(sched_day_num(2027, 1, 4))  == 1);   /* Mon, 2027 w1 */
+    assert(sched_iso_week(sched_day_num(2024, 12, 30)) == 1);  /* Mon, belongs to 2025 */
+    /* Every day in a week shares its number, and it only ever moves on Monday. */
+    for (long dn = sched_day_num(2026, 1, 1); dn < sched_day_num(2028, 1, 1); dn++) {
+        assert(sched_iso_week(dn) == sched_iso_week(sched_monday(dn)));
+        assert(sched_iso_week(dn) >= 1 && sched_iso_week(dn) <= 53);
+    }
+
     printf("sched: all checks passed\n");
     return 0;
 }

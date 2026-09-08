@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly backup of the cat medicine log
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1h
+# This Pi loses power without warning, so catch up a missed run on boot
+# rather than waiting a full hour.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

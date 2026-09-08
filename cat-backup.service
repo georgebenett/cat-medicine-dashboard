@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up the cat medicine log to a private git repo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=georges
+WorkingDirectory=/home/georges/lvgl_app
+ExecStart=/home/georges/lvgl_app/backup.sh

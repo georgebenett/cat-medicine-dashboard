@@ -57,6 +57,16 @@ static inline int sched_days_in_month(int y, int m)
     return d[m - 1];
 }
 
+/* ISO 8601 week number. The week belongs to whichever year its Thursday
+ * falls in, which is what makes 29 Dec 2025 week 1 and 1 Jan 2027 week 53. */
+static inline int sched_iso_week(long dn)
+{
+    long thu = sched_monday(dn) + 3;
+    int y, m, d;
+    sched_civil(thu, &y, &m, &d);
+    return (int)((thu - sched_day_num(y, 1, 1)) / 7) + 1;
+}
+
 /* Weekday (0=Sunday) of the next scheduled dose strictly after `wday`,
  * or -1 if no day is scheduled. A single scheduled day returns itself. */
 static inline int sched_next_wday(int mask, int wday)

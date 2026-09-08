@@ -79,8 +79,43 @@ either: of 14 photos here, 12 were orientation 6 (rotate 90 clockwise)
 and 2 were orientation 8 (90 anticlockwise). Read the tag per photo and
 rotate accordingly - a blanket rotation leaves some upside down.
 
+`pill.png` (the icon on the dose button) is loaded the same way - LVGL's
+built-in symbol font has no pill glyph. Drop a different 44x44 PNG there
+to change it.
+
 `photos/` and `cat.png` are gitignored: they are personal and this repo
 has a public remote. Copy them over with scp instead.
+
+## Backing up the log
+
+`cat_log.csv` is the only irreplaceable thing here, and it lives on an SD
+card in a board that logs undervoltage. `backup.sh` copies it into a
+clone of a **private** repo and pushes, run hourly by
+`cat-backup.timer`. It commits only when the log has actually changed, so
+the history is one commit per real change, and a wifi drop is not an
+error - the commit is on disk and the next run pushes it.
+
+No new credentials: the Pi already authenticates to github as
+georgebenett over ssh, which is how `deploy.sh` pulls.
+
+First-time setup on a new Pi:
+
+    git clone git@github.com:georgebenett/cat-log-backup.git ~/cat_backup
+    ~/lvgl_app/backup.sh          # check it works, then deploy.sh installs the timer
+
+To restore the log:
+
+    git clone git@github.com:georgebenett/cat-log-backup.git /tmp/restore
+    cp /tmp/restore/cat_log.csv ~/lvgl_app/
+    sudo systemctl restart lvglapp
+
+To restore an *older* state - say a bad shutdown truncated the file:
+
+    cd /tmp/restore && git log --oneline        # every backup is a commit
+    git checkout <commit> -- cat_log.csv
+    cp cat_log.csv ~/lvgl_app/
+
+`$CAT_BACKUP_REPO` overrides the clone location.
 
 ## Workflow
 

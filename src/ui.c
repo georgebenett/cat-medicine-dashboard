@@ -287,7 +287,9 @@ static lv_obj_t *rail_items[3];
 typedef struct { lv_obj_t *cell, *num, *dots, *dot[2]; } daycell_t;
 
 static lv_obj_t *lbl_name, *lbl_last_dose, *card_status, *lbl_status, *lbl_status_sub;
-static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *week_wd[7];
+static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *icon_dose, *week_wd[7];
+static lv_obj_t *lbl_week_no, *lbl_home_clock;
+static int overdue_now;
 static daycell_t week_cell[7], cal_cell[42];
 static lv_obj_t *lbl_cal_month;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
@@ -735,8 +737,25 @@ static void build_home(lv_obj_t *s)
     lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
     lv_obj_set_style_radius(btn_dose, 16, 0);
     lv_obj_add_event_cb(btn_dose, dose_cb, LV_EVENT_CLICKED, NULL);
-    lbl_btn_dose = text(btn_dose, 0, 0, LV_SYMBOL_OK "  Log dose given", &lv_font_montserrat_28, C_ACC_ON);
-    lv_obj_center(lbl_btn_dose);
+    /* Icon + label in a flex row. LVGL's symbol font has no pill glyph, so
+     * it is a small PNG loaded at runtime like the photos - flex skips
+     * hidden children, so hiding it re-centres the label on its own. */
+    lv_obj_t *row = lv_obj_create(btn_dose);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 16, 0);
+    lv_obj_center(row);
+
+    icon_dose = lv_img_create(row);
+    if (access("pill.png", R_OK) == 0) lv_img_set_src(icon_dose, "A:pill.png");
+    else printf("pill.png missing - button shows text only\n");
+
+    lbl_btn_dose = lv_label_create(row);
+    lv_obj_set_style_text_font(lbl_btn_dose, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_ACC_ON), 0);
+    lv_label_set_text(lbl_btn_dose, "Log dose given");
 
     lv_obj_t *b2 = lv_btn_create(s);
     lv_obj_set_pos(b2, RIGHT_X + bw + 22, 182);
@@ -749,8 +768,15 @@ static void build_home(lv_obj_t *s)
     lv_obj_t *l2 = text(b2, 0, 0, LV_SYMBOL_WARNING "  Log event", &lv_font_montserrat_28, C_TEXT);
     lv_obj_center(l2);
 
+    /* Fills the gap between the buttons and the week card. */
+    lbl_home_clock = text(s, RIGHT_X, 336, "", &lv_font_montserrat_40, C_TEXT);
+    lv_obj_set_width(lbl_home_clock, RIGHT_W);
+    lv_obj_set_style_text_align(lbl_home_clock, LV_TEXT_ALIGN_CENTER, 0);
+
     lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
     text(wk, 30, 22, "This week", &lv_font_montserrat_20, C_TEXT2);
+    lbl_week_no = text(wk, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
+    lv_obj_align(lbl_week_no, LV_ALIGN_TOP_RIGHT, -30, 22);
     int step = (RIGHT_W - 60) / 7;
     for (int i = 0; i < 7; i++) {
         int x = 30 + i * step;
@@ -988,16 +1014,20 @@ static void refresh_home(const struct tm *t, long today)
                             (overdue && !blink_on) ? LV_OPA_30 : LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(lbl_status,
                                 lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
+    overdue_now = overdue;
+    lv_label_set_text_fmt(lbl_week_no, "Week %d", sched_iso_week(today));
 
     /* Stays tappable once logged: tapping again clears today's dose, which
      * is the only way to take back a mis-tap. */
     if (given) {
         lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_BORDER_ST), 0);
+        lv_obj_add_flag(icon_dose, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(lbl_btn_dose, LV_SYMBOL_REFRESH "  Undo today's dose");
         lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_TEXT), 0);
     } else {
         lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
-        lv_label_set_text(lbl_btn_dose, LV_SYMBOL_OK "  Log dose given");
+        lv_obj_clear_flag(icon_dose, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(lbl_btn_dose, "Log dose given");
         lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_ACC_ON), 0);
     }
 
@@ -1006,8 +1036,10 @@ static void refresh_home(const struct tm *t, long today)
         int y2, m2, d2;
         sched_civil(dn, &y2, &m2, &d2);
         lv_label_set_text(week_wd[i], DAY3[sched_wday(dn)]);
-        daycell_set(&week_cell[i], d2, dn == today,
-                    dn > today ? C_MUTED : C_TEXT,
+        /* Every day in the week reads the same weight; only today is
+         * emphasised. Dimming the future days made an upcoming dose - the
+         * thing most worth noticing - the faintest thing on the card. */
+        daycell_set(&week_cell[i], d2, dn == today, C_TEXT,
                     evt_on_day(dn, 'm') != NULL, evt_on_day(dn, 'v') != NULL);
     }
 }
@@ -1140,7 +1172,7 @@ void ui_init(void)
 void ui_tick(void)
 {
     static time_t last_sec, last_photo;
-    static int last_yday = -1, dimmed;
+    static int last_yday = -1, last_min = -1, dimmed;
 
     time_t now = time(NULL);
     if (now == last_sec) return;             /* the loop runs at ~200Hz; this needs 1Hz */
@@ -1167,8 +1199,21 @@ void ui_tick(void)
         ui_backlight_apply((int)lv_slider_get_value(ui_backlight_slider));
     }
 
-    if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
-    if (cur_screen == 2) refresh_settings(&t);
+    /* Per second, only the clock and the overdue pulse. refresh_home re-sets
+     * a dozen labels and lv_label_set_text invalidates whether or not the
+     * text actually changed, so running it every second was repainting most
+     * of the screen to display the same thing. Minute granularity is enough
+     * for everything else - the reminder fires on a minute boundary. */
+    if (lbl_home_clock)
+        lv_label_set_text_fmt(lbl_home_clock, "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
+    if (status_dot && overdue_now)
+        lv_obj_set_style_bg_opa(status_dot, blink_on ? LV_OPA_COVER : LV_OPA_30, 0);
+
+    if (t.tm_min != last_min) {
+        last_min = t.tm_min;
+        if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
+        if (cur_screen == 2) refresh_settings(&t);
+    }
 
     if (n_photos > 1 && now - last_photo >= photo_secs) {
         last_photo = now;

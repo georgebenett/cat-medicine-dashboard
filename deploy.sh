@@ -27,11 +27,20 @@ sleep 1
 
 make -s -j2                                # -s: the link line is 300 object paths
 
-if ! cmp -s lvglapp.service /etc/systemd/system/lvglapp.service; then
-    sudo cp lvglapp.service /etc/systemd/system/lvglapp.service
+changed=0
+for u in lvglapp.service cat-backup.service cat-backup.timer; do
+    if ! cmp -s "$u" "/etc/systemd/system/$u"; then
+        sudo cp "$u" "/etc/systemd/system/$u"
+        echo "unit updated: $u"
+        changed=1
+    fi
+done
+if [ "$changed" = 1 ]; then
     sudo systemctl daemon-reload
-    sudo systemctl enable lvglapp
-    echo "service unit updated + enabled at boot"
+    # cat-backup.service is oneshot and triggered by its timer, so only the
+    # dashboard and the timer are enabled at boot.
+    sudo systemctl enable lvglapp cat-backup.timer
+    sudo systemctl start cat-backup.timer
 fi
 
 sudo systemctl start lvglapp
