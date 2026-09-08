@@ -63,9 +63,10 @@ static int   n_evts;
 
 /* Settings, with the defaults the mockup shows. */
 static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fri */
-static char cat_name[64] = "Mimi";   /* sized to match the cfg value buffer */
+static char cat_name[64] = "Kim";    /* sized to match the cfg value buffer */
 static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
+static int  backlight_pct = 70;                          /* remembered across restarts */
 
 static const char *env_or(const char *var, const char *dflt)
 {
@@ -146,6 +147,7 @@ static void cfg_load(void)
         if      (!strcmp(k, "days"))       { int m = atoi(v); if (m >= 0 && m < 128) med_mask = m; }
         else if (!strcmp(k, "name"))       snprintf(cat_name, sizeof cat_name, "%s", v);
         else if (!strcmp(k, "dim"))        { int m = atoi(v); if (m >= 0 && m <= 60) dim_min = m; }
+        else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
         else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
@@ -157,8 +159,8 @@ static void cfg_save(void)
 {
     FILE *f = fopen(cfg_path(), "w");
     if (!f) { perror("cat cfg save"); return; }
-    fprintf(f, "days=%d\nname=%s\ndim=%d\nreminder=%d\nreminder_h=%d\nreminder_m=%d\n",
-            med_mask, cat_name, dim_min, reminder_on, reminder_h, reminder_m);
+    fprintf(f, "days=%d\nname=%s\ndim=%d\nbacklight=%d\nreminder=%d\nreminder_h=%d\nreminder_m=%d\n",
+            med_mask, cat_name, dim_min, backlight_pct, reminder_on, reminder_h, reminder_m);
     fclose(f);
 }
 
@@ -256,7 +258,7 @@ static void month_progress(int y, int m, int *given, int *due)
 
 /* --- widget helpers ------------------------------------------------- */
 
-lv_obj_t *ui_backlight_slider;
+static lv_obj_t *ui_backlight_slider;
 
 static lv_obj_t *screens[3];
 static int  cur_screen;
@@ -369,6 +371,19 @@ static void day_pill_cb(lv_event_t *e)
     med_mask ^= 1 << (int)(intptr_t)lv_event_get_user_data(e);
     cfg_save();
     refresh();
+}
+
+static void backlight_cb(lv_event_t *e)
+{
+    ui_backlight_apply((int)lv_slider_get_value(lv_event_get_target(e)));
+}
+
+/* Saved on release, not on every value change: dragging the slider would
+ * otherwise write to the SD card a few hundred times per swipe. */
+static void backlight_save_cb(lv_event_t *e)
+{
+    backlight_pct = (int)lv_slider_get_value(lv_event_get_target(e));
+    cfg_save();
 }
 
 static void dim_cb(lv_event_t *e)
@@ -637,6 +652,9 @@ static void build_settings(lv_obj_t *s)
     lv_obj_align(ui_backlight_slider, LV_ALIGN_LEFT_MID, VX, 0);
     lv_obj_set_style_pad_all(ui_backlight_slider, 8, LV_PART_KNOB);
     lv_slider_set_range(ui_backlight_slider, 5, 100);
+    lv_slider_set_value(ui_backlight_slider, backlight_pct, LV_ANIM_OFF);
+    lv_obj_add_event_cb(ui_backlight_slider, backlight_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(ui_backlight_slider, backlight_save_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
     lbl_bl_val = text(r, 0, 0, "", &lv_font_montserrat_26, C_TEXT);
@@ -882,9 +900,9 @@ static void refresh_settings(const struct tm *t)
     if (reminder_on) lv_obj_add_state(sw_reminder, LV_STATE_CHECKED);
     else             lv_obj_clear_state(sw_reminder, LV_STATE_CHECKED);
 
-    lv_label_set_text_fmt(lbl_footer, "%d %s %d " LV_SYMBOL_BULLET " %02d:%02d " LV_SYMBOL_BULLET " %d events logged",
+    lv_label_set_text_fmt(lbl_footer, "%d %s %d " LV_SYMBOL_BULLET " %02d:%02d " LV_SYMBOL_BULLET " %d event%s logged",
                           t->tm_mday, MON3[t->tm_mon], t->tm_year + 1900,
-                          t->tm_hour, t->tm_min, n_evts);
+                          t->tm_hour, t->tm_min, n_evts, n_evts == 1 ? "" : "s");
 }
 
 static void refresh(void)
@@ -930,6 +948,11 @@ void ui_init(void)
     lv_obj_add_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
 
     show_screen(0);
+
+    /* Push the remembered brightness to the panel. Without this a restart
+     * while dimmed would leave it at raw 1 with no sign of why. */
+    ui_backlight_apply(backlight_pct);
+    printf("backlight restored to %d%%\n", backlight_pct);
 }
 
 void ui_tick(void)

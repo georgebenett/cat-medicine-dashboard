@@ -165,15 +165,6 @@ static void backlight_set_pct(int pct)
     backlight_set_raw(pct * bl_max / 100);
 }
 
-static int backlight_get_pct(void)
-{
-    if (!bl_path[0] || bl_max <= 0) return 100;
-    int v = bl_max;
-    FILE *f = fopen(bl_path, "r");
-    if (f) { if (fscanf(f, "%d", &v) != 1) v = bl_max; fclose(f); }
-    return v * 100 / bl_max;
-}
-
 /* src/ui.c dims the panel when the display goes idle. pct <= 0 means the
  * dimmest the panel will go while still lit, deliberately below the
  * BL_MIN_PCT floor that keeps the slider usable. */
@@ -181,11 +172,6 @@ void ui_backlight_apply(int pct)
 {
     if (pct <= 0) backlight_set_raw(1);
     else          backlight_set_pct(pct);
-}
-
-static void backlight_slider_cb(lv_event_t *e)
-{
-    backlight_set_pct((int)lv_slider_get_value(lv_event_get_target(e)));
 }
 
 static uint32_t millis(void)
@@ -256,16 +242,10 @@ int main(void)
     printf("lvgl reports %dx%d\n", (int)lv_disp_get_hor_res(NULL),
            (int)lv_disp_get_ver_res(NULL));
 
-    ui_init();
-
-    /* The sysfs backlight lives here; src/ui.c only owns the slider widget. */
+    /* Before ui_init: it applies the remembered brightness on the way up. */
     backlight_find();
-    if (ui_backlight_slider) {
-        lv_slider_set_value(ui_backlight_slider, backlight_get_pct(), LV_ANIM_OFF);
-        lv_obj_add_event_cb(ui_backlight_slider, backlight_slider_cb,
-                            LV_EVENT_VALUE_CHANGED, NULL);
-        printf("backlight slider wired (currently %d%%)\n", backlight_get_pct());
-    }
+
+    ui_init();
 
     /* Debug cursor on the system layer: shows where LVGL believes the
      * pointer is. Set TOUCH_CURSOR=0 to hide it once calibration is done. */

@@ -2,11 +2,9 @@
 #pragma once
 #include <lvgl/lvgl.h>
 
-/* main.c owns the sysfs backlight code and wires it to this slider. */
-extern lv_obj_t *ui_backlight_slider;
-
-/* Implemented in main.c, which owns the sysfs backlight. Used for idle
- * dimming; the slider is wired up there too. */
+/* Implemented in main.c, which owns the sysfs backlight. src/ui.c owns the
+ * slider and the remembered brightness. pct <= 0 means the dimmest the
+ * panel goes while still lit, used for idle dimming. */
 void ui_backlight_apply(int pct);
 
 void ui_init(void);

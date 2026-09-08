@@ -37,6 +37,7 @@ are readable and editable without this app, and both are gitignored
     cat_cfg.txt    days=42                   medicine-day bitmask, bit0=Sunday
                    name=Mimi
                    dim=5                     idle minutes before dimming, 0=never
+                   backlight=70              remembered brightness, restored at startup
                    reminder=1                flash the status card when overdue
                    reminder_h=9              reminder time; no picker in the UI
                    reminder_m=0
