@@ -70,4 +70,14 @@ LVGL itself is not vendored (125MB); `setup.sh` fetches it. `lv_conf.h`
 Calibration knobs, no rebuild needed: `TOUCH_SWAP`, `TOUCH_INVX`,
 `TOUCH_INVY`, `TOUCH_CURSOR=1` (red dot), `TOUCH_DEBUG=1` (coords to stderr).
 
-Run detached - stdout paints over the UI on the panel console.
+## Looking at it without the service in the way
+
+    ~/lvgl_app/run.sh     # foreground, Ctrl+C to quit
+
+Two other things paint into `/dev/fb0`: the `lvglapp` service (a second
+instance fighting for the framebuffer) and **fbcon**, the kernel's
+framebuffer console - `console=tty1` on the kernel cmdline is why
+"Undervoltage detected!" lands across the design. `run.sh` stops the
+service and unbinds fbcon for the duration, and puts both back on exit.
+
+Run detached otherwise - stdout paints over the UI on the panel console.
