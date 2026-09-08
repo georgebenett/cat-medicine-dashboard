@@ -20,6 +20,12 @@ Navigation is a left icon rail - home, calendar, gear - not a tab bar.
 Reset data deletes every logged dose and event after a confirmation.
 Settings and the schedule survive it.
 
+Exit to shell quits the dashboard and puts the console back on the panel
+- the unit is `Restart=on-failure`, so a clean exit stays stopped, and
+`ExecStopPost` rebinds fbcon. Start it again with:
+
+    sudo systemctl start lvglapp
+
 ## State
 
 Two plain text files next to the binary. Both survive a rebuild, both
@@ -83,6 +89,10 @@ LVGL itself is not vendored (125MB); `setup.sh` fetches it. `lv_conf.h`
   0-4095, not pixels.
 - **Touch coords go to LVGL unrotated** - `indev_pointer_proc()` already
   applies `disp_drv.rotated`. Rotating here too double-rotates.
+- **Only ASCII, U+00B0 and U+2022 exist in the built-in fonts**, plus the
+  `LV_SYMBOL_*` glyphs. A middle dot (U+00B7) renders as a tofu box; the
+  separator is `LV_SYMBOL_BULLET`. Check `unicode_list_1` in
+  `lvgl/src/font/lv_font_montserrat_*.c` before using any other character.
 - **Objects depend on `lv_conf.h`** in the Makefile. It reshapes LVGL's
   structs, and stale `.o` files link fine and then misbehave.
 

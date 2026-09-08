@@ -385,6 +385,37 @@ static void reminder_cb(lv_event_t *e)
     refresh();
 }
 
+static void exit_confirm_cb(lv_event_t *e)
+{
+    lv_obj_t *mb = lv_event_get_current_target(e);
+    if (lv_msgbox_get_active_btn(mb) == 0) {
+        printf("exit requested from the UI\n");
+        fflush(stdout);
+        /* Clean exit(0). The unit is Restart=on-failure, so systemd leaves it
+         * stopped rather than bouncing it back in 3s, and ExecStopPost puts
+         * the console back on the framebuffer - which is the whole point of
+         * the button. Nothing to flush: the log is written through on append. */
+        exit(0);
+    }
+    lv_msgbox_close(mb);
+}
+
+static void exit_cb(lv_event_t *e)
+{
+    (void)e;
+    static const char *btns[] = { "Quit to shell", "Cancel", "" };
+    lv_obj_t *mb = lv_msgbox_create(NULL, "Exit dashboard",
+                                    "Stops the dashboard and puts the console\n"
+                                    "back on the panel.\n"
+                                    "Start it again with:  sudo systemctl start lvglapp",
+                                    btns, false);
+    lv_obj_set_style_text_font(mb, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
+    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
+    lv_obj_add_event_cb(mb, exit_confirm_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(mb);
+}
+
 static void reset_confirm_cb(lv_event_t *e)
 {
     lv_obj_t *mb = lv_event_get_current_target(e);
@@ -647,10 +678,23 @@ static void build_settings(lv_obj_t *s)
     lv_obj_set_style_bg_color(sw_reminder, lv_color_hex(C_OK_FILL), LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw_reminder, reminder_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    lbl_footer = text(s, 0, BODY_H - 46, "", &lv_font_montserrat_22, C_TEXT2);
+    lbl_footer = text(s, 0, BODY_H - 44, "", &lv_font_montserrat_20, C_MUTED);
+    lv_obj_set_width(lbl_footer, BODY_W - 3 * 210 - 2 * 16 - 20);
+    const int BW = 210, BG2 = 16, BY = BODY_H - 62;
+
+    lv_obj_t *xt = lv_btn_create(s);
+    lv_obj_set_size(xt, BW, 62);
+    lv_obj_set_pos(xt, BODY_W - 3 * BW - 2 * BG2, BY);
+    lv_obj_set_style_bg_opa(xt, LV_OPA_0, 0);
+    lv_obj_set_style_border_color(xt, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_border_width(xt, 2, 0);
+    lv_obj_set_style_radius(xt, 18, 0);
+    lv_obj_add_event_cb(xt, exit_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_center(text(xt, 0, 0, LV_SYMBOL_POWER "  Exit to shell", &lv_font_montserrat_22, C_TEXT2));
+
     lv_obj_t *rs = lv_btn_create(s);
-    lv_obj_set_size(rs, 210, 62);
-    lv_obj_set_pos(rs, BODY_W - 230 - 226, BODY_H - 62);
+    lv_obj_set_size(rs, BW, 62);
+    lv_obj_set_pos(rs, BODY_W - 2 * BW - BG2, BY);
     lv_obj_set_style_bg_opa(rs, LV_OPA_0, 0);
     lv_obj_set_style_border_color(rs, lv_color_hex(C_BAD_FILL), 0);
     lv_obj_set_style_border_width(rs, 2, 0);
@@ -659,8 +703,8 @@ static void build_settings(lv_obj_t *s)
     lv_obj_center(text(rs, 0, 0, LV_SYMBOL_TRASH "  Reset data", &lv_font_montserrat_22, C_BAD_TEXT));
 
     lv_obj_t *ex = lv_btn_create(s);
-    lv_obj_set_size(ex, 230, 62);
-    lv_obj_set_pos(ex, BODY_W - 230, BODY_H - 62);
+    lv_obj_set_size(ex, BW, 62);
+    lv_obj_set_pos(ex, BODY_W - BW, BY);
     lv_obj_set_style_bg_opa(ex, LV_OPA_0, 0);
     lv_obj_set_style_border_color(ex, lv_color_hex(C_BORDER_ST), 0);
     lv_obj_set_style_border_width(ex, 2, 0);
@@ -707,18 +751,18 @@ static void refresh_home(const struct tm *t, long today)
 
     if (given) {
         lv_label_set_text(lbl_status, LV_SYMBOL_OK "  Dose logged today");
-        snprintf(buf, sizeof buf, "at %02d:%02d \xC2\xB7 dose %d of %d this week",
+        snprintf(buf, sizeof buf, "at %02d:%02d " LV_SYMBOL_BULLET " dose %d of %d this week",
                  given->h, given->mi, done, per_week);
     } else if (overdue) {
         lv_label_set_text(lbl_status, LV_SYMBOL_BELL "  Dose overdue");
-        snprintf(buf, sizeof buf, "due at %02d:%02d \xC2\xB7 not logged yet", reminder_h, reminder_m);
+        snprintf(buf, sizeof buf, "due at %02d:%02d " LV_SYMBOL_BULLET " not logged yet", reminder_h, reminder_m);
     } else if (is_med_day) {
         lv_label_set_text(lbl_status, "Today is a medicine day");
-        snprintf(buf, sizeof buf, "%s \xC2\xB7 dose %d of %d this week \xC2\xB7 next: %s",
+        snprintf(buf, sizeof buf, "%s " LV_SYMBOL_BULLET " dose %d of %d this week " LV_SYMBOL_BULLET " next: %s",
                  DAY[t->tm_wday], done + 1, per_week, nx >= 0 ? DAY[nx] : "not set");
     } else {
         lv_label_set_text(lbl_status, "No medicine today");
-        if (nx >= 0) snprintf(buf, sizeof buf, "%s \xC2\xB7 next dose: %s", DAY[t->tm_wday], DAY[nx]);
+        if (nx >= 0) snprintf(buf, sizeof buf, "%s " LV_SYMBOL_BULLET " next dose: %s", DAY[t->tm_wday], DAY[nx]);
         else         snprintf(buf, sizeof buf, "No days scheduled - set them in Settings");
     }
     lv_label_set_text(lbl_status_sub, buf);
@@ -833,12 +877,12 @@ static void refresh_settings(const struct tm *t)
                                     lv_color_hex(on ? C_OK_TEXT : C_TEXT2), 0);
     }
 
-    lv_label_set_text_fmt(lbl_reminder, "%02d:%02d \xC2\xB7 flash screen until logged",
+    lv_label_set_text_fmt(lbl_reminder, "%02d:%02d " LV_SYMBOL_BULLET " flash screen until logged",
                           reminder_h, reminder_m);
     if (reminder_on) lv_obj_add_state(sw_reminder, LV_STATE_CHECKED);
     else             lv_obj_clear_state(sw_reminder, LV_STATE_CHECKED);
 
-    lv_label_set_text_fmt(lbl_footer, "%d %s %d \xC2\xB7 %02d:%02d \xC2\xB7 %d events logged",
+    lv_label_set_text_fmt(lbl_footer, "%d %s %d " LV_SYMBOL_BULLET " %02d:%02d " LV_SYMBOL_BULLET " %d events logged",
                           t->tm_mday, MON3[t->tm_mon], t->tm_year + 1900,
                           t->tm_hour, t->tm_min, n_evts);
 }
