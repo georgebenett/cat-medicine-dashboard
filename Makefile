@@ -17,12 +17,13 @@ COBJS   := $(CSRCS:.c=.o)
 CXXOBJS := $(CXXSRCS:.cpp=.o)
 OBJS    := $(COBJS) $(CXXOBJS)
 
-# lv_conf.h changes the layout of half of LVGL's structs. Without this the
-# stale .o files link fine and then misbehave at runtime.
-$(OBJS): lv_conf.h
-
 app: $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LDFLAGS)
+
+# lv_conf.h reshapes half of LVGL's structs, so everything depends on it.
+# Must come AFTER the app rule: a rule's first target is make's default
+# goal, and $(OBJS) starting the file made `make` build one .o and stop.
+$(OBJS): lv_conf.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

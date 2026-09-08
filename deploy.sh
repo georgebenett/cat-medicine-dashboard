@@ -3,6 +3,11 @@
 set -e
 cd "$(dirname "$0")"
 git pull --ff-only
+
+# Installing the unit and restarting need root. Ask for it up front: over a
+# non-interactive ssh there is no tty to type into, and the `|| true` on the
+# stop below used to swallow that and "succeed" without deploying anything.
+sudo -v || { echo "deploy needs sudo - run this from a terminal on the Pi"; exit 1; }
 make -s -j2                                # -s: the link line is 300 object paths
 
 # Stop BEFORE touching the unit: systemd refuses to enable a real unit
