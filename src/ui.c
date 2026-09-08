@@ -19,26 +19,28 @@
 #include <unistd.h>
 #include <glob.h>
 
-/* Semantic palette, standing in for the mockup's CSS custom properties. */
-#define C_BG        0x101014
-#define C_SURF1     0x1e1e26
-#define C_BORDER    0x2e2e3a
-#define C_BORDER_ST 0x3d3d4d
-#define C_TEXT      0xf2f2f7
-#define C_TEXT2     0xa0a0b0
-#define C_MUTED     0x6e6e80
-#define C_ACC_FILL  0x5aa9ff
-#define C_ACC_ON    0x0a0a10
-#define C_ACC_BG    0x1e2f47
-#define C_ACC_TEXT  0x7cc0ff
-#define C_OK_BG     0x16351f
-#define C_OK_TEXT   0x5ee68a
-#define C_OK_FILL   0x3ddc84
-#define C_BAD_BG    0x3a1a1e
-#define C_BAD_TEXT  0xff8f8f
-#define C_BAD_FILL  0xff5c5c
-#define C_WARN_BG   0x3a2e12
-#define C_WARN_TEXT 0xffc45c
+/* Apple's dark-mode system palette. Surfaces are near-black and colour is
+ * spent only on state and the one primary action - the previous palette
+ * filled whole cards with saturated green, which read as a warning. */
+#define C_BG        0x000000    /* systemBackground */
+#define C_SURF1     0x1C1C1E    /* secondarySystemBackground */
+#define C_BORDER    0x38383A    /* separator */
+#define C_BORDER_ST 0x2C2C2E    /* tertiarySystemBackground, secondary fills */
+#define C_TEXT      0xFFFFFF    /* label */
+#define C_TEXT2     0x98989F    /* secondaryLabel */
+#define C_MUTED     0x5A5A5F    /* tertiaryLabel */
+#define C_ACC_FILL  0x0A84FF    /* systemBlue (dark) */
+#define C_ACC_ON    0xFFFFFF    /* label on a filled accent */
+#define C_ACC_BG    0x2C2C2E
+#define C_ACC_TEXT  0x0A84FF
+#define C_OK_BG     0x1C1C1E    /* status cards are flat now, not tinted */
+#define C_OK_TEXT   0x30D158    /* systemGreen (dark) */
+#define C_OK_FILL   0x30D158
+#define C_BAD_BG    0x1C1C1E
+#define C_BAD_TEXT  0xFF453A    /* systemRed (dark) */
+#define C_BAD_FILL  0xFF453A
+#define C_WARN_BG   0x2C2C2E
+#define C_WARN_TEXT 0xFF9F0A    /* systemOrange (dark) */
 
 /* 1280x720. The mockup is drawn at 382px tall, so its numbers are scaled
  * by 720/382 ~ 1.885 throughout. */
@@ -278,9 +280,16 @@ static int  cur_screen;
 static int  cal_y, cal_m;                                /* month the calendar shows */
 static lv_obj_t *rail_items[3];
 
+/* A day in the week strip or the month grid: the number, and up to two
+ * dots under it. Apple Calendar's language - a filled circle marks today
+ * and small dots mark what happened, instead of flooding the cell with
+ * colour, which drowned the vomiting marks in a wall of green. */
+typedef struct { lv_obj_t *cell, *num, *dots, *dot[2]; } daycell_t;
+
 static lv_obj_t *lbl_name, *lbl_last_dose, *card_status, *lbl_status, *lbl_status_sub;
-static lv_obj_t *btn_dose, *lbl_btn_dose, *week_num[7], *week_cell[7], *week_wd[7];
-static lv_obj_t *cal_cell[42], *cal_num[42], *lbl_cal_month;
+static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *week_wd[7];
+static daycell_t week_cell[7], cal_cell[42];
+static lv_obj_t *lbl_cal_month;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
@@ -312,28 +321,64 @@ static lv_obj_t *text(lv_obj_t *parent, int x, int y, const char *s,
     return l;
 }
 
-/* A circle with a centred number: the week strip and calendar cells. */
-static lv_obj_t *circle(lv_obj_t *parent, int x, int y, int d, lv_obj_t **out_lbl,
-                        const lv_font_t *font)
+static lv_obj_t *dot(lv_obj_t *parent, int d, uint32_t color)
 {
-    lv_obj_t *c = box(parent, x, y, d, d, C_SURF1, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_opa(c, LV_OPA_0, 0);
-    lv_obj_t *l = lv_label_create(c);
-    lv_obj_set_style_text_font(l, font, 0);
-    lv_label_set_text(l, "");
-    lv_obj_center(l);
-    *out_lbl = l;
-    return c;
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, d, d);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
 }
 
-static void cell_style(lv_obj_t *cell, lv_obj_t *lbl, uint32_t bg, lv_opa_t bg_opa,
-                       uint32_t fg, uint32_t border, int border_w)
+static void daycell_create(daycell_t *c, lv_obj_t *parent, int x, int y, int d,
+                           const lv_font_t *font)
 {
-    lv_obj_set_style_bg_color(cell, lv_color_hex(bg), 0);
-    lv_obj_set_style_bg_opa(cell, bg_opa, 0);
-    lv_obj_set_style_border_color(cell, lv_color_hex(border), 0);
-    lv_obj_set_style_border_width(cell, border_w, 0);
-    lv_obj_set_style_text_color(lbl, lv_color_hex(fg), 0);
+    c->cell = box(parent, x, y, d, d, C_SURF1, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_opa(c->cell, LV_OPA_0, 0);
+
+    c->num = lv_label_create(c->cell);
+    lv_obj_set_style_text_font(c->num, font, 0);
+    lv_label_set_text(c->num, "");
+    lv_obj_align(c->num, LV_ALIGN_CENTER, 0, -5);
+
+    /* Flex centres whatever is visible, and LVGL skips hidden children in
+     * layout, so one dot centres itself and two sit either side. */
+    c->dots = lv_obj_create(c->cell);
+    lv_obj_remove_style_all(c->dots);
+    lv_obj_set_size(c->dots, d, 10);
+    lv_obj_align(c->dots, LV_ALIGN_BOTTOM_MID, 0, -5);
+    lv_obj_set_flex_flow(c->dots, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(c->dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(c->dots, 6, 0);
+    lv_obj_clear_flag(c->dots, LV_OBJ_FLAG_SCROLLABLE);
+
+    for (int i = 0; i < 2; i++) {
+        c->dot[i] = dot(c->dots, 8, C_OK_FILL);
+        lv_obj_add_flag(c->dot[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void daycell_set(daycell_t *c, int dom, int today, uint32_t fg,
+                        int dose, int vomit)
+{
+    lv_label_set_text_fmt(c->num, "%d", dom);
+    if (today) {
+        lv_obj_set_style_bg_color(c->cell, lv_color_hex(C_ACC_FILL), 0);
+        lv_obj_set_style_bg_opa(c->cell, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(c->num, lv_color_hex(C_ACC_ON), 0);
+    } else {
+        lv_obj_set_style_bg_opa(c->cell, LV_OPA_0, 0);
+        lv_obj_set_style_text_color(c->num, lv_color_hex(fg), 0);
+    }
+    int n = 0;
+    if (dose)  { lv_obj_set_style_bg_color(c->dot[n], lv_color_hex(C_OK_FILL), 0);
+                 lv_obj_clear_flag(c->dot[n], LV_OBJ_FLAG_HIDDEN); n++; }
+    if (vomit) { lv_obj_set_style_bg_color(c->dot[n], lv_color_hex(C_BAD_FILL), 0);
+                 lv_obj_clear_flag(c->dot[n], LV_OBJ_FLAG_HIDDEN); n++; }
+    while (n < 2) lv_obj_add_flag(c->dot[n++], LV_OBJ_FLAG_HIDDEN);
 }
 
 static void refresh(void);
@@ -541,7 +586,7 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_set_style_border_width(rail, 1, 0);
 
     for (int i = 0; i < 3; i++) {
-        lv_obj_t *it = box(rail, 18, 22 + i * 96, 83, 83, C_ACC_BG, 20);
+        lv_obj_t *it = box(rail, 18, 22 + i * 96, 83, 83, C_ACC_BG, 18);
         lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(it, rail_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         lv_obj_t *l = lv_label_create(it);
@@ -557,7 +602,7 @@ static void build_rail(lv_obj_t *parent)
  * portrait - see photo_secs in cat_cfg.txt. */
 #define MAX_PHOTOS 64
 #define PHOTO_PAD  24
-#define PHOTO_RADIUS 26      /* card radius 38 less the 12px inset, so it stays concentric */
+#define PHOTO_RADIUS 12      /* card radius 20 less the 12px inset, so it stays concentric */
 
 static char      photo_src[MAX_PHOTOS][288];
 static int       n_photos, photo_i;
@@ -632,7 +677,7 @@ static void photo_show(int i)
 
 static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 {
-    lv_obj_t *c = box(parent, x, y, w, h, C_SURF1, 38);
+    lv_obj_t *c = box(parent, x, y, w, h, C_SURF1, 20);
     photos_scan();
 
     if (n_photos > 0) {
@@ -658,20 +703,22 @@ static void build_home(lv_obj_t *s)
     lbl_name = text(s, 0, PHOTO_H + 18, "", &lv_font_montserrat_32, C_TEXT);
     lv_obj_set_width(lbl_name, PHOTO_W);
     lv_obj_set_style_text_align(lbl_name, LV_TEXT_ALIGN_CENTER, 0);
-    lbl_last_dose = text(s, 0, PHOTO_H + 62, "", &lv_font_montserrat_22, C_TEXT2);
+    lbl_last_dose = text(s, 0, PHOTO_H + 62, "", &lv_font_montserrat_20, C_TEXT2);
     lv_obj_set_width(lbl_last_dose, PHOTO_W);
     lv_obj_set_style_text_align(lbl_last_dose, LV_TEXT_ALIGN_CENTER, 0);
 
-    card_status = box(s, RIGHT_X, 0, RIGHT_W, 160, C_OK_BG, 22);
-    lbl_status     = text(card_status, 30, 34, "", &lv_font_montserrat_36, C_OK_TEXT);
-    lbl_status_sub = text(card_status, 30, 92, "", &lv_font_montserrat_24, C_OK_TEXT);
+    card_status = box(s, RIGHT_X, 0, RIGHT_W, 160, C_SURF1, 20);
+    status_dot     = dot(card_status, 14, C_OK_FILL);
+    lv_obj_set_pos(status_dot, 32, 47);
+    lbl_status     = text(card_status, 62, 30, "", &lv_font_montserrat_32, C_TEXT);
+    lbl_status_sub = text(card_status, 62, 88, "", &lv_font_montserrat_24, C_TEXT2);
 
     int bw = (RIGHT_W - 22) / 2;
     btn_dose = lv_btn_create(s);
     lv_obj_set_pos(btn_dose, RIGHT_X, 182);
     lv_obj_set_size(btn_dose, bw, 120);
     lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
-    lv_obj_set_style_radius(btn_dose, 20, 0);
+    lv_obj_set_style_radius(btn_dose, 16, 0);
     lv_obj_add_event_cb(btn_dose, dose_cb, LV_EVENT_CLICKED, NULL);
     lbl_btn_dose = text(btn_dose, 0, 0, LV_SYMBOL_OK "  Log dose given", &lv_font_montserrat_28, C_ACC_ON);
     lv_obj_center(lbl_btn_dose);
@@ -679,23 +726,24 @@ static void build_home(lv_obj_t *s)
     lv_obj_t *b2 = lv_btn_create(s);
     lv_obj_set_pos(b2, RIGHT_X + bw + 22, 182);
     lv_obj_set_size(b2, bw, 120);
-    lv_obj_set_style_bg_opa(b2, LV_OPA_0, 0);
-    lv_obj_set_style_border_color(b2, lv_color_hex(C_BORDER_ST), 0);
-    lv_obj_set_style_border_width(b2, 2, 0);
-    lv_obj_set_style_radius(b2, 20, 0);
+    lv_obj_set_style_bg_color(b2, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_bg_opa(b2, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(b2, 0, 0);
+    lv_obj_set_style_radius(b2, 16, 0);
     lv_obj_add_event_cb(b2, event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l2 = text(b2, 0, 0, LV_SYMBOL_WARNING "  Log event", &lv_font_montserrat_28, C_TEXT);
     lv_obj_center(l2);
 
-    lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 22);
-    text(wk, 30, 22, "This week", &lv_font_montserrat_22, C_TEXT2);
+    lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
+    text(wk, 30, 22, "This week", &lv_font_montserrat_20, C_TEXT2);
     int step = (RIGHT_W - 60) / 7;
     for (int i = 0; i < 7; i++) {
         int x = 30 + i * step;
         week_wd[i] = text(wk, x, 66, "", &lv_font_montserrat_20, C_MUTED);
         lv_obj_set_width(week_wd[i], step - 8);
         lv_obj_set_style_text_align(week_wd[i], LV_TEXT_ALIGN_CENTER, 0);
-        week_cell[i] = circle(wk, x + (step - 8 - 60) / 2, 98, 60, &week_num[i], &lv_font_montserrat_26);
+        daycell_create(&week_cell[i], wk, x + (step - 8 - 62) / 2, 96, 62,
+                       &lv_font_montserrat_24);
     }
 }
 
@@ -727,46 +775,57 @@ static void build_calendar(lv_obj_t *s)
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     }
     for (int i = 0; i < 42; i++)
-        cal_cell[i] = circle(s, (i % 7) * STEP, 108 + (i / 7) * STEP, CELL,
-                             &cal_num[i], &lv_font_montserrat_24);
+        daycell_create(&cal_cell[i], s, (i % 7) * STEP, 108 + (i / 7) * STEP, CELL,
+                       &lv_font_montserrat_24);
 
     int ly = 108 + 6 * STEP + 10;
     box(s, 0, ly + 8, 18, 18, C_OK_FILL, LV_RADIUS_CIRCLE);
-    text(s, 28, ly, "Dose given", &lv_font_montserrat_22, C_TEXT2);
+    text(s, 28, ly, "Dose given", &lv_font_montserrat_20, C_TEXT2);
     box(s, 190, ly + 8, 18, 18, C_BAD_FILL, LV_RADIUS_CIRCLE);
-    text(s, 218, ly, "Event", &lv_font_montserrat_22, C_TEXT2);
+    text(s, 218, ly, "Event", &lv_font_montserrat_20, C_TEXT2);
 
     /* Right column: three stat cards over the recent list. */
     const int RX = CAL_W + GAP, RW = BODY_W - RX, SW = (RW - 24) / 3;
     const char *names[3] = { "This month", "Streak", "Vomiting" };
     lv_obj_t **vals[3] = { &lbl_stat_month, &lbl_stat_streak, &lbl_stat_events };
     for (int i = 0; i < 3; i++) {
-        lv_obj_t *c = box(s, RX + i * (SW + 12), 0, SW, 110, C_SURF1, 18);
+        lv_obj_t *c = box(s, RX + i * (SW + 12), 0, SW, 110, C_SURF1, 16);
         text(c, 16, 16, names[i], &lv_font_montserrat_20, C_TEXT2);
-        *vals[i] = text(c, 16, 48, "", &lv_font_montserrat_36, C_TEXT);
+        *vals[i] = text(c, 16, 48, "", &lv_font_montserrat_32, C_TEXT);
     }
-    text(s, RX, 132, "Recent", &lv_font_montserrat_22, C_TEXT2);
-    lbl_recent = text(s, RX, 172, "", &lv_font_montserrat_22, C_TEXT);
+    text(s, RX, 132, "Recent", &lv_font_montserrat_20, C_TEXT2);
+    lbl_recent = text(s, RX, 172, "", &lv_font_montserrat_20, C_TEXT);
     lv_obj_set_width(lbl_recent, RW);
     lv_label_set_long_mode(lbl_recent, LV_LABEL_LONG_CLIP);
 }
 
-static lv_obj_t *settings_row(lv_obj_t *s, int y, int h, const char *icon, const char *label)
+#define SET_RH   112
+#define SET_ROWS 4
+
+static lv_obj_t *settings_group;
+
+/* One card holding all the rows, split by hairlines inset past the icon -
+ * four separate floating cards was a lot of chrome for four settings. */
+static lv_obj_t *settings_row(int idx, const char *icon, const char *label)
 {
-    lv_obj_t *c = box(s, 0, y, BODY_W, h, C_SURF1, 18);
-    lv_obj_t *i = text(c, 28, 0, icon, &lv_font_montserrat_28, C_TEXT2);
-    lv_obj_align(i, LV_ALIGN_LEFT_MID, 28, 0);
-    lv_obj_t *l = text(c, 80, 0, label, &lv_font_montserrat_26, C_TEXT);
-    lv_obj_align(l, LV_ALIGN_LEFT_MID, 80, 0);
+    lv_obj_t *c = box(settings_group, 0, idx * SET_RH, BODY_W, SET_RH, C_SURF1, 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_0, 0);
+    lv_obj_t *i = text(c, 0, 0, icon, &lv_font_montserrat_24, C_TEXT2);
+    lv_obj_align(i, LV_ALIGN_LEFT_MID, 32, 0);
+    lv_obj_t *l = text(c, 0, 0, label, &lv_font_montserrat_24, C_TEXT);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 88, 0);
+    if (idx < SET_ROWS - 1)
+        box(settings_group, 88, (idx + 1) * SET_RH - 1, BODY_W - 88, 1, C_BORDER, 0);
     return c;
 }
 
 static void build_settings(lv_obj_t *s)
 {
-    const int RH = 104, RY = 118, VX = 300;
+    const int VX = 300;
     const int SLD_W = 380, SLD_H = 12;      /* the first pass was full-width and 26 thick */
 
-    lv_obj_t *r = settings_row(s, 0, RH, LV_SYMBOL_EYE_OPEN, "Backlight");
+    settings_group = box(s, 0, 0, BODY_W, SET_ROWS * SET_RH, C_SURF1, 20);
+    lv_obj_t *r = settings_row(0, LV_SYMBOL_EYE_OPEN, "Backlight");
     ui_backlight_slider = lv_slider_create(r);
     lv_obj_set_size(ui_backlight_slider, SLD_W, SLD_H);
     lv_obj_align(ui_backlight_slider, LV_ALIGN_LEFT_MID, VX, 0);
@@ -777,10 +836,10 @@ static void build_settings(lv_obj_t *s)
     lv_obj_add_event_cb(ui_backlight_slider, backlight_save_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(ui_backlight_slider, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
-    lbl_bl_val = text(r, 0, 0, "", &lv_font_montserrat_26, C_TEXT);
+    lbl_bl_val = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT);
     lv_obj_align(lbl_bl_val, LV_ALIGN_RIGHT_MID, -28, 0);
 
-    r = settings_row(s, RY, RH, LV_SYMBOL_POWER, "Dim after");
+    r = settings_row(1, LV_SYMBOL_POWER, "Dim after");
     sld_dim = lv_slider_create(r);
     lv_obj_set_size(sld_dim, SLD_W, SLD_H);
     lv_obj_align(sld_dim, LV_ALIGN_LEFT_MID, VX, 0);
@@ -790,10 +849,10 @@ static void build_settings(lv_obj_t *s)
     lv_obj_add_event_cb(sld_dim, dim_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
-    lbl_dim_val = text(r, 0, 0, "", &lv_font_montserrat_26, C_TEXT);
+    lbl_dim_val = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT);
     lv_obj_align(lbl_dim_val, LV_ALIGN_RIGHT_MID, -28, 0);
 
-    r = settings_row(s, 2 * RY, RH, LV_SYMBOL_OK, "Medicine days");
+    r = settings_row(2, LV_SYMBOL_OK, "Medicine days");
     for (int i = 0; i < 7; i++) {
         /* Displayed Mon..Sun, stored bit0=Sun. */
         int wday = (i + 1) % 7;
@@ -802,12 +861,12 @@ static void build_settings(lv_obj_t *s)
         lv_obj_align(p, LV_ALIGN_LEFT_MID, VX + i * 102, 0);
         lv_obj_set_style_radius(p, 28, 0);
         lv_obj_add_event_cb(p, day_pill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)wday);
-        lv_obj_t *l = text(p, 0, 0, DAY3[wday], &lv_font_montserrat_22, C_TEXT);
+        lv_obj_t *l = text(p, 0, 0, DAY3[wday], &lv_font_montserrat_20, C_TEXT);
         lv_obj_center(l);
         day_pill[i] = p;
     }
 
-    r = settings_row(s, 3 * RY, RH, LV_SYMBOL_BELL, "Reminder");
+    r = settings_row(3, LV_SYMBOL_BELL, "Reminder");
     lbl_reminder = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
     lv_obj_align(lbl_reminder, LV_ALIGN_LEFT_MID, VX, 0);
     sw_reminder = lv_switch_create(r);
@@ -823,32 +882,32 @@ static void build_settings(lv_obj_t *s)
     lv_obj_t *xt = lv_btn_create(s);
     lv_obj_set_size(xt, BW, 62);
     lv_obj_set_pos(xt, BODY_W - 3 * BW - 2 * BG2, BY);
-    lv_obj_set_style_bg_opa(xt, LV_OPA_0, 0);
-    lv_obj_set_style_border_color(xt, lv_color_hex(C_BORDER_ST), 0);
-    lv_obj_set_style_border_width(xt, 2, 0);
-    lv_obj_set_style_radius(xt, 18, 0);
+    lv_obj_set_style_bg_color(xt, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_bg_opa(xt, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(xt, 0, 0);
+    lv_obj_set_style_radius(xt, 14, 0);
     lv_obj_add_event_cb(xt, exit_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_center(text(xt, 0, 0, LV_SYMBOL_POWER "  Exit to shell", &lv_font_montserrat_22, C_TEXT2));
+    lv_obj_center(text(xt, 0, 0, LV_SYMBOL_POWER "  Exit to shell", &lv_font_montserrat_20, C_TEXT2));
 
     lv_obj_t *rs = lv_btn_create(s);
     lv_obj_set_size(rs, BW, 62);
     lv_obj_set_pos(rs, BODY_W - 2 * BW - BG2, BY);
-    lv_obj_set_style_bg_opa(rs, LV_OPA_0, 0);
-    lv_obj_set_style_border_color(rs, lv_color_hex(C_BAD_FILL), 0);
-    lv_obj_set_style_border_width(rs, 2, 0);
-    lv_obj_set_style_radius(rs, 18, 0);
+    lv_obj_set_style_bg_color(rs, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_bg_opa(rs, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(rs, 0, 0);
+    lv_obj_set_style_radius(rs, 14, 0);
     lv_obj_add_event_cb(rs, reset_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_center(text(rs, 0, 0, LV_SYMBOL_TRASH "  Reset data", &lv_font_montserrat_22, C_BAD_TEXT));
+    lv_obj_center(text(rs, 0, 0, LV_SYMBOL_TRASH "  Reset data", &lv_font_montserrat_20, C_BAD_TEXT));
 
     lv_obj_t *ex = lv_btn_create(s);
     lv_obj_set_size(ex, BW, 62);
     lv_obj_set_pos(ex, BODY_W - BW, BY);
-    lv_obj_set_style_bg_opa(ex, LV_OPA_0, 0);
-    lv_obj_set_style_border_color(ex, lv_color_hex(C_BORDER_ST), 0);
-    lv_obj_set_style_border_width(ex, 2, 0);
-    lv_obj_set_style_radius(ex, 18, 0);
+    lv_obj_set_style_bg_color(ex, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_bg_opa(ex, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(ex, 0, 0);
+    lv_obj_set_style_radius(ex, 14, 0);
     lv_obj_add_event_cb(ex, export_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_center(text(ex, 0, 0, LV_SYMBOL_DOWNLOAD "  Export log", &lv_font_montserrat_22, C_TEXT));
+    lv_obj_center(text(ex, 0, 0, LV_SYMBOL_DOWNLOAD "  Export log", &lv_font_montserrat_20, C_TEXT));
 }
 
 /* --- refresh -------------------------------------------------------- */
@@ -882,20 +941,20 @@ static void refresh_home(const struct tm *t, long today)
     int nx = sched_next_wday(med_mask, t->tm_wday);
     int overdue = dose_overdue(t, is_med_day, given);
 
-    uint32_t bg = C_SURF1, fg = C_TEXT2;
-    if (given)        { bg = C_OK_BG;   fg = C_OK_TEXT; }
-    else if (overdue) { bg = C_BAD_BG;  fg = C_BAD_TEXT; }
-    else if (is_med_day) { bg = C_OK_BG; fg = C_OK_TEXT; }
+    uint32_t accent = C_MUTED;
+    if (given)           accent = C_OK_FILL;
+    else if (overdue)    accent = C_BAD_FILL;
+    else if (is_med_day) accent = C_OK_FILL;
 
     if (given) {
-        lv_label_set_text(lbl_status, LV_SYMBOL_OK "  Dose logged today");
+        lv_label_set_text(lbl_status, "Dose logged today");
         snprintf(buf, sizeof buf, "at %02d:%02d " LV_SYMBOL_BULLET " dose %d of %d this week",
                  given->h, given->mi, done, per_week);
     } else if (overdue) {
-        lv_label_set_text(lbl_status, LV_SYMBOL_BELL "  Dose overdue");
+        lv_label_set_text(lbl_status, "Dose overdue");
         snprintf(buf, sizeof buf, "due at %02d:%02d " LV_SYMBOL_BULLET " not logged yet", reminder_h, reminder_m);
     } else if (is_med_day) {
-        lv_label_set_text(lbl_status, "Today is a medicine day");
+        lv_label_set_text(lbl_status, "Medicine day");
         snprintf(buf, sizeof buf, "%s " LV_SYMBOL_BULLET " dose %d of %d this week " LV_SYMBOL_BULLET " next: %s",
                  DAY[t->tm_wday], done + 1, per_week, nx >= 0 ? DAY[nx] : "not set");
     } else {
@@ -905,24 +964,24 @@ static void refresh_home(const struct tm *t, long today)
     }
     lv_label_set_text(lbl_status_sub, buf);
 
-    /* Overdue blinks rather than animating: one colour swap per second in
-     * ui_tick is cheaper than an animation on a software-rotated panel. */
-    lv_obj_set_style_bg_color(card_status,
-                              lv_color_hex(overdue && blink_on ? C_BAD_TEXT : bg), 0);
-    lv_obj_set_style_text_color(lbl_status,     lv_color_hex(overdue && blink_on ? C_BAD_BG : fg), 0);
-    lv_obj_set_style_text_color(lbl_status_sub, lv_color_hex(overdue && blink_on ? C_BAD_BG : fg), 0);
+    /* Overdue pulses the dot and reddens the title. The old version flashed
+     * the whole card, which was hard to look at and buried the text. One
+     * opacity swap per second in ui_tick, no animation - cheap on a
+     * software-rotated panel. */
+    lv_obj_set_style_bg_color(status_dot, lv_color_hex(accent), 0);
+    lv_obj_set_style_bg_opa(status_dot,
+                            (overdue && !blink_on) ? LV_OPA_30 : LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(lbl_status,
+                                lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
 
     /* Stays tappable once logged: tapping again clears today's dose, which
      * is the only way to take back a mis-tap. */
     if (given) {
-        lv_obj_set_style_bg_opa(btn_dose, LV_OPA_0, 0);
-        lv_obj_set_style_border_color(btn_dose, lv_color_hex(C_BORDER_ST), 0);
-        lv_obj_set_style_border_width(btn_dose, 2, 0);
+        lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_BORDER_ST), 0);
         lv_label_set_text(lbl_btn_dose, LV_SYMBOL_REFRESH "  Undo today's dose");
-        lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_TEXT2), 0);
+        lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_TEXT), 0);
     } else {
-        lv_obj_set_style_bg_opa(btn_dose, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(btn_dose, 0, 0);
+        lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
         lv_label_set_text(lbl_btn_dose, LV_SYMBOL_OK "  Log dose given");
         lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_ACC_ON), 0);
     }
@@ -932,13 +991,9 @@ static void refresh_home(const struct tm *t, long today)
         int y2, m2, d2;
         sched_civil(dn, &y2, &m2, &d2);
         lv_label_set_text(week_wd[i], DAY3[sched_wday(dn)]);
-        lv_label_set_text_fmt(week_num[i], "%d", d2);
-        if (dn == today)
-            cell_style(week_cell[i], week_num[i], C_BG, LV_OPA_0, C_ACC_TEXT, C_ACC_FILL, 3);
-        else if (evt_on_day(dn, 'm'))
-            cell_style(week_cell[i], week_num[i], C_OK_BG, LV_OPA_COVER, C_OK_TEXT, C_BG, 0);
-        else
-            cell_style(week_cell[i], week_num[i], C_BG, LV_OPA_0, C_MUTED, C_BG, 0);
+        daycell_set(&week_cell[i], d2, dn == today,
+                    dn > today ? C_MUTED : C_TEXT,
+                    evt_on_day(dn, 'm') != NULL, evt_on_day(dn, 'v') != NULL);
     }
 }
 
@@ -957,21 +1012,11 @@ static void refresh_calendar(long today)
         int in_month = off >= 0 && off < ndays;
         int cy, cm, dom;
         sched_civil(dn, &cy, &cm, &dom);
-        lv_label_set_text_fmt(cal_num[i], "%d", dom);
-
         int has_dose  = evt_on_day(dn, 'm') != NULL;
         int has_event = evt_on_day(dn, 'v') != NULL;
-        if (!in_month)
-            cell_style(cal_cell[i], cal_num[i], C_BG, LV_OPA_0, 0x45455a, C_BG, 0);
-        else if (dn == today)
-            cell_style(cal_cell[i], cal_num[i], C_BG, LV_OPA_0, C_ACC_TEXT, C_ACC_FILL, 3);
-        else if (has_dose)
-            cell_style(cal_cell[i], cal_num[i], C_OK_BG, LV_OPA_COVER, C_OK_TEXT,
-                       has_event ? C_BAD_FILL : C_BG, has_event ? 3 : 0);
-        else if (has_event)
-            cell_style(cal_cell[i], cal_num[i], C_BAD_BG, LV_OPA_COVER, C_BAD_TEXT, C_BG, 0);
-        else
-            cell_style(cal_cell[i], cal_num[i], C_BG, LV_OPA_0, C_TEXT, C_BG, 0);
+        daycell_set(&cal_cell[i], dom, in_month && dn == today,
+                    in_month ? C_TEXT : C_MUTED,
+                    in_month && has_dose, in_month && has_event);
     }
 
     int given, due;
@@ -1006,12 +1051,11 @@ static void refresh_settings(const struct tm *t)
     for (int i = 0; i < 7; i++) {
         int wday = (i + 1) % 7;
         int on = (med_mask >> wday) & 1;
-        lv_obj_set_style_bg_color(day_pill[i], lv_color_hex(on ? C_OK_BG : C_SURF1), 0);
-        lv_obj_set_style_bg_opa(day_pill[i], on ? LV_OPA_COVER : LV_OPA_0, 0);
-        lv_obj_set_style_border_color(day_pill[i], lv_color_hex(on ? C_OK_FILL : C_BORDER_ST), 0);
-        lv_obj_set_style_border_width(day_pill[i], 2, 0);
+        lv_obj_set_style_bg_color(day_pill[i], lv_color_hex(on ? C_ACC_FILL : C_BORDER_ST), 0);
+        lv_obj_set_style_bg_opa(day_pill[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(day_pill[i], 0, 0);
         lv_obj_set_style_text_color(lv_obj_get_child(day_pill[i], 0),
-                                    lv_color_hex(on ? C_OK_TEXT : C_TEXT2), 0);
+                                    lv_color_hex(on ? C_ACC_ON : C_TEXT2), 0);
     }
 
     lv_label_set_text_fmt(lbl_reminder, "%02d:%02d " LV_SYMBOL_BULLET " flash screen until logged",
@@ -1063,11 +1107,14 @@ void ui_init(void)
     lv_obj_set_style_bg_color(lbl_toast, lv_color_hex(C_ACC_FILL), 0);
     lv_obj_set_style_bg_opa(lbl_toast, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(lbl_toast, 16, 0);
-    lv_obj_set_style_radius(lbl_toast, 14, 0);
+    lv_obj_set_style_radius(lbl_toast, 16, 0);
     lv_obj_align(lbl_toast, LV_ALIGN_BOTTOM_MID, RAIL_W / 2, -26);
     lv_obj_add_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
 
-    show_screen(0);
+    /* CAT_SCREEN=0|1|2 picks the screen to open on. Same spirit as
+     * TOUCH_DEBUG in main.c: a way to look at a screen without a finger. */
+    const char *sc = getenv("CAT_SCREEN");
+    show_screen(sc ? atoi(sc) % 3 : 0);
 
     /* Push the remembered brightness to the panel. Without this a restart
      * while dimmed would leave it at raw 1 with no sign of why. */
