@@ -50,6 +50,7 @@
 #define BODY_W   (SCR_W - RAIL_W - 2 * PAD)
 #define BODY_H   (SCR_H - 2 * PAD)
 #define PHOTO_W  400
+#define PHOTO_H  540      /* 3:4-ish, to match the photos rather than crop them */
 #define GAP      38
 #define RIGHT_X  (PHOTO_W + GAP)
 #define RIGHT_W  (BODY_W - RIGHT_X)
@@ -508,7 +509,7 @@ static void build_rail(lv_obj_t *parent)
  * single cat.png) and restart, no rebuild. They shuffle like a digital
  * portrait - see photo_secs in cat_cfg.txt. */
 #define MAX_PHOTOS 64
-#define PHOTO_BOX  (PHOTO_W - 24)
+#define PHOTO_PAD  24
 
 static char      photo_src[MAX_PHOTOS][288];
 static int       n_photos, photo_i;
@@ -561,9 +562,12 @@ static void photo_show(int i)
     /* Each photo has its own dimensions, so the zoom is per-photo. Scale
      * down to fit; never upscale, a small photo would just blur. */
     if (lv_img_decoder_get_info(photo_src[i], &hdr) == LV_RES_OK && hdr.w > 0 && hdr.h > 0) {
-        int longest = hdr.w > hdr.h ? hdr.w : hdr.h;
-        int zoom = 256 * PHOTO_BOX / longest;
-        if (zoom > 256) zoom = 256;
+        /* Fit inside both axes of the card. The old long-side-only version
+         * was fine while the card was square; it is not any more. */
+        int zx = 256 * (PHOTO_W - PHOTO_PAD) / hdr.w;
+        int zy = 256 * (PHOTO_H - PHOTO_PAD) / hdr.h;
+        int zoom = zx < zy ? zx : zy;
+        if (zoom > 256) zoom = 256;      /* never upscale, it would just blur */
         if (zoom < 16)  zoom = 16;
         lv_img_set_zoom(photo_img, (uint16_t)zoom);
     }
@@ -591,11 +595,11 @@ static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 
 static void build_home(lv_obj_t *s)
 {
-    build_photo(s, 0, 0, PHOTO_W, PHOTO_W);
-    lbl_name = text(s, 0, PHOTO_W + 22, "", &lv_font_montserrat_32, C_TEXT);
+    build_photo(s, 0, 0, PHOTO_W, PHOTO_H);
+    lbl_name = text(s, 0, PHOTO_H + 18, "", &lv_font_montserrat_32, C_TEXT);
     lv_obj_set_width(lbl_name, PHOTO_W);
     lv_obj_set_style_text_align(lbl_name, LV_TEXT_ALIGN_CENTER, 0);
-    lbl_last_dose = text(s, 0, PHOTO_W + 66, "", &lv_font_montserrat_22, C_TEXT2);
+    lbl_last_dose = text(s, 0, PHOTO_H + 62, "", &lv_font_montserrat_22, C_TEXT2);
     lv_obj_set_width(lbl_last_dose, PHOTO_W);
     lv_obj_set_style_text_align(lbl_last_dose, LV_TEXT_ALIGN_CENTER, 0);
 

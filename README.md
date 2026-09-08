@@ -66,7 +66,15 @@ to 4 bytes per pixel and has to fit in `LV_MEM_SIZE` (8MB), so anything
 that would decode past 6MB is skipped with a line on stdout - a stock
 phone photo is ~4000x3000, which is 48MB. Resize first:
 
-    sips -Z 420 -s format png IMG_1234.jpg --out photos/kim_01.png
+    sips -r 90 IMG_1234.jpg              # see below
+    sips -Z 520 -s format png IMG_1234.jpg --out photos/kim_01.png
+
+**Apply EXIF orientation first.** Phone photos are stored as a landscape
+raster plus an orientation tag, and `sips -Z` ignores that tag, so every
+picture arrives on the panel rotated. It is not one fixed rotation
+either: of 14 photos here, 12 were orientation 6 (rotate 90 clockwise)
+and 2 were orientation 8 (90 anticlockwise). Read the tag per photo and
+rotate accordingly - a blanket rotation leaves some upside down.
 
 `photos/` and `cat.png` are gitignored: they are personal and this repo
 has a public remote. Copy them over with scp instead.
