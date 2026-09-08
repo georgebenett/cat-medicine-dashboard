@@ -567,9 +567,22 @@ static void day_pill_cb(lv_event_t *e)
     refresh();
 }
 
+/* The value labels are written here as well as in refresh_settings, because
+ * refresh_settings only runs once a minute now - the sliders have to track
+ * the drag themselves. */
+static void backlight_label(int pct) { lv_label_set_text_fmt(lbl_bl_val, "%d%%", pct); }
+
+static void dim_label(int m)
+{
+    if (m) lv_label_set_text_fmt(lbl_dim_val, "%d min", m);
+    else   lv_label_set_text(lbl_dim_val, "never");
+}
+
 static void backlight_cb(lv_event_t *e)
 {
-    ui_backlight_apply((int)lv_slider_get_value(lv_event_get_target(e)));
+    int pct = (int)lv_slider_get_value(lv_event_get_target(e));
+    ui_backlight_apply(pct);
+    backlight_label(pct);
 }
 
 /* Saved on release, not on every value change: dragging the slider would
@@ -583,8 +596,16 @@ static void backlight_save_cb(lv_event_t *e)
 static void dim_cb(lv_event_t *e)
 {
     dim_min = (int)lv_slider_get_value(lv_event_get_target(e));
+    dim_label(dim_min);
+}
+
+/* Saved on release like the backlight slider. Doing it per value change
+ * wrote the SD card - and ran a full refresh(), rebuilding the calendar -
+ * on every pixel of the drag. */
+static void dim_save_cb(lv_event_t *e)
+{
+    (void)e;
     cfg_save();
-    refresh();
 }
 
 static void reminder_cb(lv_event_t *e)
@@ -1015,6 +1036,7 @@ static void build_settings(lv_obj_t *s)
     lv_slider_set_range(sld_dim, 0, 30);
     lv_slider_set_value(sld_dim, dim_min, LV_ANIM_OFF);
     lv_obj_add_event_cb(sld_dim, dim_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(sld_dim, dim_save_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_KNOB);
     lbl_dim_val = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT);
@@ -1247,9 +1269,8 @@ static void refresh_calendar(long today)
 static void refresh_settings(const struct tm *t)
 {
     if (ui_backlight_slider)
-        lv_label_set_text_fmt(lbl_bl_val, "%d%%", (int)lv_slider_get_value(ui_backlight_slider));
-    if (dim_min) lv_label_set_text_fmt(lbl_dim_val, "%d min", dim_min);
-    else         lv_label_set_text(lbl_dim_val, "never");
+        backlight_label((int)lv_slider_get_value(ui_backlight_slider));
+    dim_label(dim_min);
 
     for (int i = 0; i < 7; i++) {
         int wday = (i + 1) % 7;
