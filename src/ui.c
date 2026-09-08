@@ -790,36 +790,44 @@ static void build_home(lv_obj_t *s)
 
 static void build_calendar(lv_obj_t *s)
 {
-    const int CAL_W = 622, CELL = 68, STEP = 79;
+    /* Sized so six rows plus the legend land inside BODY_H with room to
+     * spare: 4 + 56 header, 104 grid start, 6 rows of 74, legend at 556. */
+    const int CAL_W = 540, CELL = 64, STEP = 74, GRID_Y = 104;
 
-    lv_obj_t *prev = lv_btn_create(s);
-    lv_obj_set_pos(prev, 0, 0); lv_obj_set_size(prev, 60, 60);
-    lv_obj_set_style_bg_opa(prev, LV_OPA_0, 0);
-    lv_obj_add_event_cb(prev, cal_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-    lv_obj_center(text(prev, 0, 0, LV_SYMBOL_LEFT, &lv_font_montserrat_28, C_TEXT2));
+    lv_obj_t *arrow[2];
+    for (int i = 0; i < 2; i++) {
+        arrow[i] = lv_btn_create(s);
+        lv_obj_set_pos(arrow[i], i ? CAL_W - 56 : 0, 4);
+        lv_obj_set_size(arrow[i], 56, 56);
+        /* The default button style draws a shadow outside the object, and
+         * at y=0 the parent clipped it - which is what cut the tops off. */
+        lv_obj_set_style_shadow_width(arrow[i], 0, 0);
+        lv_obj_set_style_bg_opa(arrow[i], LV_OPA_0, 0);
+        lv_obj_set_style_radius(arrow[i], 14, 0);
+        lv_obj_set_style_bg_color(arrow[i], lv_color_hex(C_BORDER_ST), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(arrow[i], LV_OPA_COVER, LV_STATE_PRESSED);
+        lv_obj_add_event_cb(arrow[i], cal_step_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)(i ? 1 : -1));
+        lv_obj_center(text(arrow[i], 0, 0, i ? LV_SYMBOL_RIGHT : LV_SYMBOL_LEFT,
+                           &lv_font_montserrat_28, C_TEXT2));
+    }
 
-    lbl_cal_month = text(s, 60, 12, "", &lv_font_montserrat_32, C_TEXT);
-    lv_obj_set_width(lbl_cal_month, CAL_W - 120);
+    lbl_cal_month = text(s, 56, 14, "", &lv_font_montserrat_32, C_TEXT);
+    lv_obj_set_width(lbl_cal_month, CAL_W - 112);
     lv_obj_set_style_text_align(lbl_cal_month, LV_TEXT_ALIGN_CENTER, 0);
-
-    lv_obj_t *next = lv_btn_create(s);
-    lv_obj_set_pos(next, CAL_W - 60, 0); lv_obj_set_size(next, 60, 60);
-    lv_obj_set_style_bg_opa(next, LV_OPA_0, 0);
-    lv_obj_add_event_cb(next, cal_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
-    lv_obj_center(text(next, 0, 0, LV_SYMBOL_RIGHT, &lv_font_montserrat_28, C_TEXT2));
 
     /* Weeks run Mon..Sun, like the mockup. */
     static const char *wd[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
     for (int i = 0; i < 7; i++) {
-        lv_obj_t *l = text(s, i * STEP, 74, wd[i], &lv_font_montserrat_20, C_MUTED);
+        lv_obj_t *l = text(s, i * STEP, 72, wd[i], &lv_font_montserrat_20, C_MUTED);
         lv_obj_set_width(l, CELL);
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     }
     for (int i = 0; i < 42; i++)
-        daycell_create(&cal_cell[i], s, (i % 7) * STEP, 108 + (i / 7) * STEP, CELL,
+        daycell_create(&cal_cell[i], s, (i % 7) * STEP, GRID_Y + (i / 7) * STEP, CELL,
                        &lv_font_montserrat_24);
 
-    int ly = 108 + 6 * STEP + 10;
+    int ly = GRID_Y + 5 * STEP + CELL + 18;
     box(s, 0, ly + 8, 18, 18, C_OK_FILL, LV_RADIUS_CIRCLE);
     text(s, 28, ly, "Dose given", &lv_font_montserrat_20, C_TEXT2);
     box(s, 190, ly + 8, 18, 18, C_BAD_FILL, LV_RADIUS_CIRCLE);
@@ -1052,8 +1060,13 @@ static void refresh_calendar(long today)
     long first = sched_day_num(cal_y, cal_m, 1);
     long grid0 = sched_monday(first);                    /* grid starts on a Monday */
     int  ndays = sched_days_in_month(cal_y, cal_m);
+    /* Most months fit in five rows; showing a sixth row of nothing but next
+     * month's greyed-out days wasted 74px and made the screen feel full. */
+    int  rows_used = (int)((first - grid0) + ndays + 6) / 7;
 
     for (int i = 0; i < 42; i++) {
+        if (i / 7 >= rows_used) { lv_obj_add_flag(cal_cell[i].cell, LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(cal_cell[i].cell, LV_OBJ_FLAG_HIDDEN);
         long dn = grid0 + i;
         long off = dn - first;
         int in_month = off >= 0 && off < ndays;
