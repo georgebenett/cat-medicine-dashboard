@@ -53,18 +53,23 @@ the slider's brightness on the next touch.
 
 Paths are overridable: `CAT_LOG`, `CAT_CFG`, `CAT_IMG`.
 
-## Her photo
+## Her photos
 
-Drop a PNG at `cat.png` next to the binary and restart. It is loaded at
-runtime through LVGL's POSIX filesystem driver, *not* compiled in as a C
-array, so changing the picture needs no rebuild. Keep it under ~1200px
-on the long side: it decodes to 4 bytes per pixel and has to fit in
-`LV_MEM_SIZE` (8MB). Oversized or missing, the app draws a placeholder
-and says so on stderr rather than failing.
+Drop PNGs in `photos/` next to the binary and restart. They shuffle like
+a digital portrait, one a minute (`photo_secs` in `cat_cfg.txt`), in a
+random order that shows the whole set before repeating. A single
+`cat.png` still works as a fallback if `photos/` is empty.
 
-To have it deploy with a `git pull`, commit it:
+Loaded at runtime through LVGL's POSIX filesystem driver, *not* compiled
+in as C arrays, so changing the pictures needs no rebuild. Each decodes
+to 4 bytes per pixel and has to fit in `LV_MEM_SIZE` (8MB), so anything
+that would decode past 6MB is skipped with a line on stdout - a stock
+phone photo is ~4000x3000, which is 48MB. Resize first:
 
-    git add -f cat.png && git commit -m "her" && git push
+    sips -Z 420 -s format png IMG_1234.jpg --out photos/kim_01.png
+
+`photos/` and `cat.png` are gitignored: they are personal and this repo
+has a public remote. Copy them over with scp instead.
 
 ## Workflow
 

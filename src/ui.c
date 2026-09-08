@@ -17,6 +17,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <glob.h>
 
 /* Semantic palette, standing in for the mockup's CSS custom properties. */
 #define C_BG        0x101014
@@ -67,6 +68,7 @@ static char cat_name[64] = "Kim";    /* sized to match the cfg value buffer */
 static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 70;                          /* remembered across restarts */
+static int  photo_secs = 60;                             /* portrait shuffle interval */
 
 static const char *env_or(const char *var, const char *dflt)
 {
@@ -148,6 +150,7 @@ static void cfg_load(void)
         else if (!strcmp(k, "name"))       snprintf(cat_name, sizeof cat_name, "%s", v);
         else if (!strcmp(k, "dim"))        { int m = atoi(v); if (m >= 0 && m <= 60) dim_min = m; }
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
+        else if (!strcmp(k, "photo_secs")) { int s = atoi(v); if (s >= 5 && s <= 3600) photo_secs = s; }
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
         else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
@@ -159,8 +162,10 @@ static void cfg_save(void)
 {
     FILE *f = fopen(cfg_path(), "w");
     if (!f) { perror("cat cfg save"); return; }
-    fprintf(f, "days=%d\nname=%s\ndim=%d\nbacklight=%d\nreminder=%d\nreminder_h=%d\nreminder_m=%d\n",
-            med_mask, cat_name, dim_min, backlight_pct, reminder_on, reminder_h, reminder_m);
+    fprintf(f, "days=%d\nname=%s\ndim=%d\nbacklight=%d\nphoto_secs=%d\n"
+               "reminder=%d\nreminder_h=%d\nreminder_m=%d\n",
+            med_mask, cat_name, dim_min, backlight_pct, photo_secs,
+            reminder_on, reminder_h, reminder_m);
     fclose(f);
 }
 
@@ -499,34 +504,86 @@ static void build_rail(lv_obj_t *parent)
     }
 }
 
-/* The photo is a file, not a compiled-in C array: drop any PNG at cat.png
- * next to the binary and restart, no rebuild. */
+/* Photos are files, not compiled-in C arrays: drop PNGs in photos/ (or a
+ * single cat.png) and restart, no rebuild. They shuffle like a digital
+ * portrait - see photo_secs in cat_cfg.txt. */
+#define MAX_PHOTOS 64
+#define PHOTO_BOX  (PHOTO_W - 24)
+
+static char      photo_src[MAX_PHOTOS][288];
+static int       n_photos, photo_i;
+static lv_obj_t *photo_img;
+
+static void photos_scan(void)
+{
+    glob_t g;
+    n_photos = 0;
+    if (glob("photos/*.png", 0, NULL, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc && n_photos < MAX_PHOTOS; i++) {
+            char cand[288];
+            lv_img_header_t hdr;
+            snprintf(cand, sizeof cand, "A:%s", g.gl_pathv[i]);
+            /* A full-size phone photo decodes to ~48MB and would blow
+             * LV_MEM_SIZE, so refuse it here rather than at draw time. */
+            if (lv_img_decoder_get_info(cand, &hdr) != LV_RES_OK ||
+                (long)hdr.w * hdr.h * 4 >= 6L * 1024 * 1024) {
+                printf("photo: skipping %s, too large to decode\n", g.gl_pathv[i]);
+                continue;
+            }
+            memcpy(photo_src[n_photos++], cand, sizeof cand);
+        }
+    }
+    globfree(&g);
+
+    if (n_photos == 0 && access(img_path(), R_OK) == 0)      /* single-photo fallback */
+        snprintf(photo_src[n_photos++], sizeof photo_src[0], "A:%s", img_path());
+    printf("photos: %d usable\n", n_photos);
+}
+
+/* Fisher-Yates. Reshuffled only after the last one has been shown, so the
+ * whole set goes past before anything repeats. */
+static void photos_shuffle(void)
+{
+    for (int i = n_photos - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        char t[288];
+        memcpy(t, photo_src[i], sizeof t);
+        memcpy(photo_src[i], photo_src[j], sizeof t);
+        memcpy(photo_src[j], t, sizeof t);
+    }
+}
+
+static void photo_show(int i)
+{
+    lv_img_header_t hdr;
+    if (!photo_img || n_photos == 0) return;
+    lv_img_set_src(photo_img, photo_src[i]);
+    /* Each photo has its own dimensions, so the zoom is per-photo. Scale
+     * down to fit; never upscale, a small photo would just blur. */
+    if (lv_img_decoder_get_info(photo_src[i], &hdr) == LV_RES_OK && hdr.w > 0 && hdr.h > 0) {
+        int longest = hdr.w > hdr.h ? hdr.w : hdr.h;
+        int zoom = 256 * PHOTO_BOX / longest;
+        if (zoom > 256) zoom = 256;
+        if (zoom < 16)  zoom = 16;
+        lv_img_set_zoom(photo_img, (uint16_t)zoom);
+    }
+    lv_obj_center(photo_img);
+}
+
 static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 {
     lv_obj_t *c = box(parent, x, y, w, h, C_SURF1, 38);
-    const char *file = img_path();
-    static char src[512];
-    snprintf(src, sizeof src, "A:%s", file);
+    photos_scan();
 
-    lv_img_header_t hdr;
-    if (access(file, R_OK) == 0 && lv_img_decoder_get_info(src, &hdr) == LV_RES_OK &&
-        hdr.w > 0 && hdr.h > 0 && (long)hdr.w * hdr.h * 4 < 6L * 1024 * 1024) {
-        lv_obj_t *img = lv_img_create(c);
-        lv_img_set_src(img, src);
-        /* Scale down to fit; never upscale, a small photo would just blur. */
-        int box_px = (w < h ? w : h) - 24;
-        int longest = hdr.w > hdr.h ? hdr.w : hdr.h;
-        int zoom = 256 * box_px / longest;
-        if (zoom > 256) zoom = 256;
-        if (zoom < 16)  zoom = 16;
-        lv_img_set_zoom(img, (uint16_t)zoom);
-        lv_img_set_antialias(img, true);
-        lv_obj_center(img);
-        printf("photo: %s %dx%d zoom %d/256\n", file, hdr.w, hdr.h, zoom);
+    if (n_photos > 0) {
+        photos_shuffle();
+        photo_img = lv_img_create(c);
+        lv_img_set_antialias(photo_img, true);
+        photo_show(0);
     } else {
-        printf("photo: %s missing or too large to decode - showing placeholder\n", file);
+        printf("photos: none found - showing placeholder\n");
         lv_obj_set_style_bg_color(c, lv_color_hex(C_WARN_BG), 0);
-        lv_obj_t *l = text(c, 0, 0, "Put a photo of her at\ncat.png", &lv_font_montserrat_24, C_WARN_TEXT);
+        lv_obj_t *l = text(c, 0, 0, "Put her photos in\nphotos/", &lv_font_montserrat_24, C_WARN_TEXT);
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(l);
     }
@@ -920,6 +977,7 @@ void ui_init(void)
 {
     cfg_load();
     store_load();
+    srand((unsigned)time(NULL));
 
     struct tm t = now_tm();
     cal_y = t.tm_year + 1900;
@@ -957,7 +1015,7 @@ void ui_init(void)
 
 void ui_tick(void)
 {
-    static time_t last_sec;
+    static time_t last_sec, last_photo;
     static int last_yday = -1, dimmed;
 
     time_t now = time(NULL);
@@ -987,6 +1045,12 @@ void ui_tick(void)
 
     if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
     if (cur_screen == 2) refresh_settings(&t);
+
+    if (n_photos > 1 && now - last_photo >= photo_secs) {
+        last_photo = now;
+        if (++photo_i >= n_photos) { photo_i = 0; photos_shuffle(); }
+        photo_show(photo_i);
+    }
 
     if (t.tm_yday != last_yday) {            /* midnight: today's status changed */
         last_yday = t.tm_yday;

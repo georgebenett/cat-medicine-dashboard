@@ -9,3 +9,7 @@ app
 # device state, written by the app
 cat_log.csv
 cat_cfg.txt
+
+# her photos - personal, and this repo has a public remote
+photos/
+cat.png
