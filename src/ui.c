@@ -58,7 +58,14 @@
 /* --- store ---------------------------------------------------------- */
 
 #define MAX_EVTS 4000
-typedef struct { int y, mo, d, h, mi; char t; } evt_t;   /* t: 'm'edicine | 'v'omit */
+typedef struct { int y, mo, d, h, mi; char t; } evt_t;   /* 'm'edicine | 'v'omit | 'f'ood */
+
+static const char *evt_word(char t) { return t == 'v' ? "vomit" : t == 'f' ? "food" : "med"; }
+static const char *evt_label(char t) { return t == 'v' ? "Vomiting" : t == 'f' ? "Food" : "Dose given"; }
+static const char *evt_icon(char t)
+{
+    return t == 'v' ? LV_SYMBOL_WARNING : t == 'f' ? LV_SYMBOL_PLUS : LV_SYMBOL_OK;
+}
 
 static evt_t evts[MAX_EVTS];
 static int   n_evts;
@@ -89,7 +96,7 @@ static void store_load(void)
     while (n_evts < MAX_EVTS && fgets(line, sizeof line, f)) {
         evt_t e; char kind[16];
         if (sscanf(line, "%d-%d-%dT%d:%d,%15s", &e.y, &e.mo, &e.d, &e.h, &e.mi, kind) == 6) {
-            e.t = (kind[0] == 'v') ? 'v' : 'm';
+            e.t = (kind[0] == 'v') ? 'v' : (kind[0] == 'f') ? 'f' : 'm';
             evts[n_evts++] = e;
         }
     }
@@ -107,7 +114,7 @@ static void store_append(char t)
     FILE *f = fopen(log_path(), "a");
     if (f) {
         fprintf(f, "%04d-%02d-%02dT%02d:%02d,%s\n", e.y, e.mo, e.d, e.h, e.mi,
-                t == 'v' ? "vomit" : "med");
+                evt_word(t));
         fclose(f);
     } else {
         perror("cat log append");
@@ -123,7 +130,7 @@ static void store_rewrite(void)
     if (!f) { perror("cat log rewrite"); return; }
     for (int i = 0; i < n_evts; i++)
         fprintf(f, "%04d-%02d-%02dT%02d:%02d,%s\n", evts[i].y, evts[i].mo, evts[i].d,
-                evts[i].h, evts[i].mi, evts[i].t == 'v' ? "vomit" : "med");
+                evts[i].h, evts[i].mi, evt_word(evts[i].t));
     fclose(f);
 }
 
@@ -362,7 +369,28 @@ static void dose_cb(lv_event_t *e)
     else                        { store_append('m');            toast("Dose logged"); }
     refresh();
 }
-static void event_cb(lv_event_t *e)  { (void)e; store_append('v'); toast("Event logged"); refresh(); }
+static void event_choice_cb(lv_event_t *e)
+{
+    lv_obj_t *mb = lv_event_get_current_target(e);
+    switch (lv_msgbox_get_active_btn(mb)) {
+        case 0: store_append('v'); toast("Vomiting logged"); refresh(); break;
+        case 1: store_append('f'); toast("Food logged");     refresh(); break;
+        default: break;                                   /* Cancel */
+    }
+    lv_msgbox_close(mb);
+}
+
+static void event_cb(lv_event_t *e)
+{
+    (void)e;
+    static const char *btns[] = { "Vomiting", "Food", "Cancel", "" };
+    lv_obj_t *mb = lv_msgbox_create(NULL, "Log event", "What happened?", btns, false);
+    lv_obj_set_style_text_font(mb, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_bg_color(mb, lv_color_hex(C_SURF1), 0);
+    lv_obj_set_style_text_color(mb, lv_color_hex(C_TEXT), 0);
+    lv_obj_add_event_cb(mb, event_choice_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(mb);
+}
 
 static void cal_step_cb(lv_event_t *e)
 {
@@ -510,10 +538,11 @@ static void build_rail(lv_obj_t *parent)
  * portrait - see photo_secs in cat_cfg.txt. */
 #define MAX_PHOTOS 64
 #define PHOTO_PAD  24
+#define PHOTO_RADIUS 26      /* card radius 38 less the 12px inset, so it stays concentric */
 
 static char      photo_src[MAX_PHOTOS][288];
 static int       n_photos, photo_i;
-static lv_obj_t *photo_img;
+static lv_obj_t *photo_img, *photo_wrap;
 
 static void photos_scan(void)
 {
@@ -570,6 +599,14 @@ static void photo_show(int i)
         if (zoom > 256) zoom = 256;      /* never upscale, it would just blur */
         if (zoom < 16)  zoom = 16;
         lv_img_set_zoom(photo_img, (uint16_t)zoom);
+
+        /* Round the picture's own corners. clip_corner masks an object's
+         * CHILDREN, so the mask has to live on a wrapper sized to the drawn
+         * image - the card is bigger than the photo, so its corners are
+         * nowhere near them. lv_img_get_transformed_size is not public in
+         * 8.3, but zoom and the header give the same answer. */
+        lv_obj_set_size(photo_wrap, hdr.w * zoom / 256, hdr.h * zoom / 256);
+        lv_obj_center(photo_wrap);
     }
     lv_obj_center(photo_img);
 }
@@ -581,7 +618,10 @@ static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 
     if (n_photos > 0) {
         photos_shuffle();
-        photo_img = lv_img_create(c);
+        photo_wrap = box(c, 0, 0, 10, 10, C_SURF1, PHOTO_RADIUS);
+        lv_obj_set_style_bg_opa(photo_wrap, LV_OPA_0, 0);
+        lv_obj_set_style_clip_corner(photo_wrap, true, 0);
+        photo_img = lv_img_create(photo_wrap);
         lv_img_set_antialias(photo_img, true);
         photo_show(0);
     } else {
@@ -679,7 +719,7 @@ static void build_calendar(lv_obj_t *s)
 
     /* Right column: three stat cards over the recent list. */
     const int RX = CAL_W + GAP, RW = BODY_W - RX, SW = (RW - 24) / 3;
-    const char *names[3] = { "This month", "Streak", "Events" };
+    const char *names[3] = { "This month", "Streak", "Vomiting" };
     lv_obj_t **vals[3] = { &lbl_stat_month, &lbl_stat_streak, &lbl_stat_events };
     for (int i = 0; i < 3; i++) {
         lv_obj_t *c = box(s, RX + i * (SW + 12), 0, SW, 110, C_SURF1, 18);
@@ -928,8 +968,7 @@ static void refresh_calendar(long today)
     for (int i = n_evts - 1, shown = 0; i >= 0 && shown < 9; i--, shown++) {
         long dn = evt_day(&evts[i]);
         int n = snprintf(buf + off, sizeof buf - off, "%s  %-12s %s %d %s %02d:%02d\n",
-                         evts[i].t == 'v' ? LV_SYMBOL_WARNING : LV_SYMBOL_OK,
-                         evts[i].t == 'v' ? "Event" : "Dose given",
+                         evt_icon(evts[i].t), evt_label(evts[i].t),
                          DAY3[sched_wday(dn)], evts[i].d, MON3[evts[i].mo - 1],
                          evts[i].h, evts[i].mi);
         if (n < 0 || (size_t)n >= sizeof buf - off) break;

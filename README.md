@@ -8,12 +8,15 @@ LVGL 8.3, hand-written C, no UI builder.
 
 Navigation is a left icon rail - home, calendar, gear - not a tab bar.
 
-- **Today** - her photo and name, whether today is a medicine day, the
+- **Today** - her photos and name, whether today is a medicine day, the
   dose count for the week, a Mon..Sun strip, and buttons to log a dose or
   an event. Once a dose is logged the button becomes "Undo today's dose":
-  that is the only way to take back a mis-tap.
-- **Calendar** - a month grid, green for a dose and red for an event,
-  with month/streak/event stats and a recent list.
+  that is the only way to take back a mis-tap. Log event asks which kind:
+  vomiting or food.
+- **Calendar** - a month grid, green for a dose and red for vomiting,
+  with month/streak/vomiting stats and a recent list. Food is logged and
+  listed but deliberately not marked on the grid: it happens most days
+  and would colour in every cell.
 - **Settings** - backlight, idle dim, which weekdays are medicine days,
   a reminder toggle, and buttons to export or reset the log.
 
@@ -33,7 +36,7 @@ are readable and editable without this app, and both are gitignored
 (they are device data, not source):
 
     cat_log.csv    2026-09-08T19:47,med      append-only, one event per line
-                   2026-09-07T22:03,vomit
+                   2026-09-07T22:03,vomit     kinds: med | vomit | food
     cat_cfg.txt    days=42                   medicine-day bitmask, bit0=Sunday
                    name=Mimi
                    dim=5                     idle minutes before dimming, 0=never
