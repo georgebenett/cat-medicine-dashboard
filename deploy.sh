@@ -33,6 +33,13 @@ for u in lvglapp.service cat-backup.service cat-backup.timer \
          cat-wifi.service cat-wifi.timer cat-dim.service; do
     if ! cmp -s "$u" "/etc/systemd/system/$u"; then
         sudo cp "$u" "/etc/systemd/system/$u"
+        # Verify: a brownout mid-copy left cat-dim.service zero length once,
+        # and systemd reads a zero-length unit as *masked* - so it silently
+        # never ran rather than failing loudly.
+        if ! cmp -s "$u" "/etc/systemd/system/$u"; then
+            echo "ERROR: $u did not install correctly" >&2
+            exit 1
+        fi
         echo "unit updated: $u"
         changed=1
     fi
