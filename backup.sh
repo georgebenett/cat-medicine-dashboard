@@ -36,12 +36,13 @@ if git diff --cached --quiet; then
 fi
 
 n=$(grep -c . cat_log.csv 2>/dev/null || true); n=${n:-0}
-git commit -q -m "$(date '+%Y-%m-%d %H:%M') - $n events"
+plural=s; [ "$n" = 1 ] && plural=
+git commit -q -m "$(date '+%Y-%m-%d %H:%M') - $n event$plural"
 
 # Don't let a wifi drop fail the unit: the next run picks it up, and the
 # commit is already safely on disk.
 if git push -q origin main 2>/dev/null; then
-    echo "pushed ($n events)"
+    echo "pushed ($n event$plural)"
 else
     echo "committed locally, push failed - will retry next run" >&2
 fi
