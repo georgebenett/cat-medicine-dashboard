@@ -834,6 +834,11 @@ static void build_home(lv_obj_t *s)
      * hidden children, so hiding it re-centres the label on its own. */
     lv_obj_t *row = lv_obj_create(btn_dose);
     lv_obj_remove_style_all(row);
+    /* lv_obj_create() is CLICKABLE by default and remove_style_all() does not
+     * touch flags. Centred over the button, the row swallowed every tap that
+     * landed on the icon or label - i.e. the middle, where people actually
+     * press - so only edge taps reached btn_dose. */
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
