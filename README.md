@@ -20,8 +20,10 @@ Navigation is a left icon rail - home, calendar, gear - not a tab bar.
 - **Settings** - backlight, idle dim, which weekdays are medicine days,
   a reminder toggle, and buttons to export or reset the log.
 
-Reset data deletes every logged dose and event after a confirmation.
-Settings and the schedule survive it.
+Reset data renames the log to `archive_YYYYMMDD-HHMM.csv` rather than
+deleting it, and `backup.sh` pushes those too. Reset sits next to Exit to
+shell, and the confirm dialog should not be the only thing between a
+mis-tap and months of history. Settings and the schedule survive it.
 
 Exit to shell quits the dashboard and puts the console back on the panel
 - the unit is `Restart=on-failure`, so a clean exit stays stopped, and
@@ -39,8 +41,9 @@ are readable and editable without this app, and both are gitignored
                    2026-09-07T22:03,vomit     kinds: med | vomit | food
     cat_cfg.txt    days=42                   medicine-day bitmask, bit0=Sunday
                    name=Mimi
-                   dim=5                     idle minutes before dimming, 0=never
-                   dim_pct=15                idle brightness, never above the awake one
+                   quiet_from=23             night dim starts (hour)
+                   quiet_to=5                night dim ends (hour)
+                   dim_pct=15                night brightness, never above the awake one
                    backlight=70              remembered brightness, restored at startup
                    reminder=1                flash the status card when overdue
                    reminder_h=9              reminder time; no picker in the UI
@@ -50,10 +53,15 @@ Default schedule is Mon/Wed/Fri - three a week. Change it in Settings,
 not in the source. A bare integer in cat_cfg.txt is still read as the day
 mask, which is what the first version of this file held.
 
-Idle dimming uses LVGL's own `lv_disp_get_inactive_time()`. It drops to
-`dim_pct` (15% by default), which is still readable across the room, and
-restores the slider's brightness on the next touch. It never dims *up*:
-if the slider is below `dim_pct`, that lower value is used instead.
+Dimming is by the clock, not by idleness: `quiet_from`..`quiet_to`
+(23:00-05:00 by default) drops the panel to `dim_pct`, and the rest of
+the day it sits at whatever the Backlight slider says. An idle timer used
+to put the panel to sleep in the middle of the day, which is exactly when
+an unlogged dose most needs to catch someone's eye.
+
+It never dims *up*: if the slider is below `dim_pct`, that lower value is
+used instead. The window wraps midnight, so 23->5 is not a plain range
+test - see `in_quiet_hours()`.
 
 The near-off level (raw 1) is only used during boot, before the UI has
 anything to show.

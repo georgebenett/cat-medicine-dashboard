@@ -76,7 +76,8 @@ static int   n_evts;
 /* Settings, with the defaults the mockup shows. */
 static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fri */
 static char cat_name[64] = "Kim";    /* sized to match the cfg value buffer */
-static int  dim_min = 5;                                 /* 0 = never dim */
+static int  quiet_from = 23, quiet_to = 5;               /* night dim window */
+static int  dimmed;                                      /* inside that window now */
 static int  dim_pct = 15;                                /* idle level, not off */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
@@ -140,11 +141,23 @@ static void store_rewrite(void)
     fclose(f);
 }
 
+/* Rename, never delete. Reset sits next to Exit to shell, and a mis-tap
+ * should not be able to destroy months of history - the confirm dialog
+ * should not be the only thing standing between the two. backup.sh picks
+ * archive_*.csv up, so it reaches the backup repo too. */
 static void store_clear_all(void)
 {
+    time_t now = time(NULL);
+    struct tm t = *localtime(&now);
+    char dst[256];
+
     n_evts = 0;
-    if (remove(log_path()) != 0 && access(log_path(), F_OK) == 0)
-        perror("cat log remove");
+    if (access(log_path(), F_OK) != 0) return;            /* nothing to keep */
+
+    snprintf(dst, sizeof dst, "archive_%04d%02d%02d-%02d%02d.csv",
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+    if (rename(log_path(), dst) != 0) perror("cat log archive");
+    else printf("log archived to %s\n", dst);
 }
 
 static void cfg_load(void)
@@ -162,7 +175,8 @@ static void cfg_load(void)
         }
         if      (!strcmp(k, "days"))       { int m = atoi(v); if (m >= 0 && m < 128) med_mask = m; }
         else if (!strcmp(k, "name"))       snprintf(cat_name, sizeof cat_name, "%s", v);
-        else if (!strcmp(k, "dim"))        { int m = atoi(v); if (m >= 0 && m <= 60) dim_min = m; }
+        else if (!strcmp(k, "quiet_from")) { int h = atoi(v); if (h >= 0 && h < 24) quiet_from = h; }
+        else if (!strcmp(k, "quiet_to"))   { int h = atoi(v); if (h >= 0 && h < 24) quiet_to = h; }
         else if (!strcmp(k, "dim_pct"))    { int p = atoi(v); if (p >= 5 && p <= 60) dim_pct = p; }
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
         else if (!strcmp(k, "photo_secs")) { int s = atoi(v); if (s >= 5 && s <= 3600) photo_secs = s; }
@@ -182,9 +196,9 @@ static void cfg_save(void)
     /* lat/lon are written back even though nothing in the UI edits them:
      * cfg_save rewrites the whole file, so a key it does not know about
      * would be silently dropped the first time a setting changed. */
-    fprintf(f, "days=%d\nname=%s\ndim=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
+    fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n",
-            med_mask, cat_name, dim_min, dim_pct, backlight_pct, photo_secs,
+            med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct, photo_secs,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon);
     fclose(f);
 }
@@ -566,13 +580,17 @@ static void day_pill_cb(lv_event_t *e)
 /* The value labels are written here as well as in refresh_settings, because
  * refresh_settings only runs once a minute now - the sliders have to track
  * the drag themselves. */
+/* The window wraps midnight, so 23->5 is not a simple range test. */
+static int in_quiet_hours(int hour)
+{
+    if (quiet_from == quiet_to) return 0;                 /* disabled */
+    if (quiet_from < quiet_to)  return hour >= quiet_from && hour < quiet_to;
+    return hour >= quiet_from || hour < quiet_to;
+}
+
 static void backlight_label(int pct) { lv_label_set_text_fmt(lbl_bl_val, "%d%%", pct); }
 
-static void dim_label(int m)
-{
-    if (m) lv_label_set_text_fmt(lbl_dim_val, "%d min", m);
-    else   lv_label_set_text(lbl_dim_val, "never");
-}
+static void dim_label(int pct) { lv_label_set_text_fmt(lbl_dim_val, "%d%%", pct); }
 
 static void backlight_cb(lv_event_t *e)
 {
@@ -591,8 +609,11 @@ static void backlight_save_cb(lv_event_t *e)
 
 static void dim_cb(lv_event_t *e)
 {
-    dim_min = (int)lv_slider_get_value(lv_event_get_target(e));
-    dim_label(dim_min);
+    dim_pct = (int)lv_slider_get_value(lv_event_get_target(e));
+    dim_label(dim_pct);
+    /* Apply live if we are already in the window, so the slider shows what
+     * it will actually look like tonight. */
+    if (dimmed) ui_backlight_apply(dim_pct);
 }
 
 /* Saved on release like the backlight slider. Doing it per value change
@@ -684,47 +705,13 @@ static void export_cb(lv_event_t *e)
  * they run straight off the 1Hz tick with no helper thread or polling of
  * nmcli/bluetoothctl (spawning those every few seconds on a Pi 3A+ would
  * cost far more than the icons are worth). */
-static lv_obj_t *ico_wifi, *ico_bt, *lbl_cpu, *lbl_ram;
+static lv_obj_t *ico_wifi, *ico_bt;
 
 /* CPU busy% between calls, from /proc/stat jiffies. Needs a previous
  * sample to diff against, which the 5s tick supplies; the first call has
  * nothing to compare and reports "--". */
-static int cpu_pct(void)
-{
-    static unsigned long long prev_tot, prev_idle;
-    unsigned long long u, n, sy, id, wa, hi, si, stl;
-    FILE *f = fopen("/proc/stat", "r");
-    if (!f) return -1;
-    int got = fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
-                     &u, &n, &sy, &id, &wa, &hi, &si, &stl);
-    fclose(f);
-    if (got != 8) return -1;
-    unsigned long long idle = id + wa;
-    unsigned long long tot  = u + n + sy + id + wa + hi + si + stl;
-    unsigned long long dt = tot - prev_tot, di = idle - prev_idle;
-    int primed = prev_tot != 0;
-    prev_tot = tot; prev_idle = idle;
-    if (!primed || dt == 0) return -1;
-    return (int)((dt - di) * 100 / dt);
-}
-
 /* MiB in use. MemAvailable, not MemFree: on 424MB of RAM the page cache
  * makes MemFree look alarming while the memory is in fact reclaimable. */
-static int ram_used_mb(void)
-{
-    FILE *f = fopen("/proc/meminfo", "r");
-    if (!f) return -1;
-    char line[128];
-    unsigned long total = 0, avail = 0;
-    while (fgets(line, sizeof line, f)) {
-        if (!total) sscanf(line, "MemTotal: %lu kB", &total);
-        if (!avail) sscanf(line, "MemAvailable: %lu kB", &avail);
-        if (total && avail) break;
-    }
-    fclose(f);
-    return total ? (int)((total - avail) / 1024) : -1;
-}
-
 static int wifi_up(void)
 {
     char st[16] = { 0 };
@@ -754,16 +741,6 @@ static void refresh_status_icons(void)
     if (ico_bt)
         lv_obj_set_style_text_color(ico_bt, lv_color_hex(bt_connected() ? C_OK_FILL : C_MUTED), 0);
 
-    if (lbl_cpu) {
-        int c = cpu_pct();
-        if (c < 0) lv_label_set_text(lbl_cpu, "CPU --");
-        else       lv_label_set_text_fmt(lbl_cpu, "CPU %d%%", c);
-    }
-    if (lbl_ram) {
-        int m = ram_used_mb();
-        if (m < 0) lv_label_set_text(lbl_ram, "RAM --");
-        else       lv_label_set_text_fmt(lbl_ram, "RAM %dM", m);
-    }
 }
 
 static void build_rail(lv_obj_t *parent)
@@ -792,8 +769,6 @@ static void build_rail(lv_obj_t *parent)
     } st[] = {
         { LV_SYMBOL_WIFI,      SCR_H - 170, &lv_font_montserrat_28, C_MUTED, &ico_wifi },
         { LV_SYMBOL_BLUETOOTH, SCR_H - 126, &lv_font_montserrat_28, C_MUTED, &ico_bt   },
-        { "CPU --",            SCR_H -  72, &lv_font_montserrat_14, C_TEXT,  &lbl_cpu  },
-        { "RAM --",            SCR_H -  48, &lv_font_montserrat_14, C_TEXT,  &lbl_ram  },
     };
     for (unsigned i = 0; i < sizeof st / sizeof st[0]; i++) {
         lv_obj_t *l = lv_label_create(rail);
@@ -1148,13 +1123,13 @@ static void build_settings(lv_obj_t *s)
     lbl_bl_val = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT);
     lv_obj_align(lbl_bl_val, LV_ALIGN_RIGHT_MID, -28, 0);
 
-    r = settings_row(1, LV_SYMBOL_POWER, "Dim after");
+    r = settings_row(1, LV_SYMBOL_POWER, "Night dim");
     sld_dim = lv_slider_create(r);
     lv_obj_set_size(sld_dim, SLD_W, SLD_H);
     lv_obj_align(sld_dim, LV_ALIGN_LEFT_MID, VX, 0);
     lv_obj_set_style_pad_all(sld_dim, 8, LV_PART_KNOB);
-    lv_slider_set_range(sld_dim, 0, 30);
-    lv_slider_set_value(sld_dim, dim_min, LV_ANIM_OFF);
+    lv_slider_set_range(sld_dim, 5, 50);
+    lv_slider_set_value(sld_dim, dim_pct, LV_ANIM_OFF);
     lv_obj_add_event_cb(sld_dim, dim_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(sld_dim, dim_save_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_set_style_bg_color(sld_dim, lv_color_hex(C_ACC_FILL), LV_PART_INDICATOR);
@@ -1379,7 +1354,7 @@ static void refresh_settings(const struct tm *t)
 {
     if (ui_backlight_slider)
         backlight_label((int)lv_slider_get_value(ui_backlight_slider));
-    dim_label(dim_min);
+    dim_label(dim_pct);
 
     for (int i = 0; i < 7; i++) {
         int wday = (i + 1) % 7;
@@ -1461,7 +1436,7 @@ int ui_backlight_pct(void) { return backlight_pct; }
 void ui_tick(void)
 {
     static time_t last_sec, last_photo;
-    static int last_yday = -1, last_min = -1, dimmed;
+    static int last_yday = -1, last_min = -1;
 
     time_t now = time(NULL);
     if (now == last_sec) return;             /* the loop runs at ~200Hz; this needs 1Hz */
@@ -1485,23 +1460,18 @@ void ui_tick(void)
         toast_until = 0;
     }
 
-    /* Idle dimming. lv_disp_get_inactive_time() already tracks the last
-     * input event, so there is nothing to wire up here. */
-    if (dim_min > 0) {
-        int idle = lv_disp_get_inactive_time(NULL) > (uint32_t)dim_min * 60000;
-        if (idle != dimmed) {
+    /* Dim by the clock, not by idleness. An idle timer put the panel to
+     * sleep in the middle of the day, which is exactly when an unlogged
+     * dose most needs to catch someone's eye. */
+    {
+        int night = in_quiet_hours(t.tm_hour);
+        if (night != dimmed) {
             int awake = (int)lv_slider_get_value(ui_backlight_slider);
-            /* Dim to a level that is still readable across the room, not to
-             * the near-off used during boot. Never brighter than the awake
-             * setting: dimming up if the slider is below dim_pct would be
-             * absurd. */
+            /* Never dim *up*: if the slider sits below dim_pct, keep it. */
             int low = dim_pct < awake ? dim_pct : awake;
-            dimmed = idle;
-            ui_backlight_apply(idle ? low : awake);
+            dimmed = night;
+            ui_backlight_apply(night ? low : awake);
         }
-    } else if (dimmed) {
-        dimmed = 0;
-        ui_backlight_apply((int)lv_slider_get_value(ui_backlight_slider));
     }
 
     /* Without seconds nothing on screen changes faster than once a minute,

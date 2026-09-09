@@ -21,6 +21,10 @@ fi
 copied=0
 [ -f cat_log.csv ] && { cp -f cat_log.csv "$REPO/cat_log.csv"; copied=1; }
 [ -f cat_cfg.txt ] && { cp -f cat_cfg.txt "$REPO/cat_cfg.txt"; copied=1; }
+# Archives from a Reset, so a mis-tap is recoverable from the backup too.
+for a in archive_*.csv; do
+    [ -e "$a" ] && { cp -f "$a" "$REPO/"; copied=1; }
+done
 [ "$copied" = 1 ] || { echo "nothing to back up yet"; exit 0; }
 
 cd "$REPO"
