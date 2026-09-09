@@ -688,7 +688,46 @@ static void export_cb(lv_event_t *e)
  * they run straight off the 1Hz tick with no helper thread or polling of
  * nmcli/bluetoothctl (spawning those every few seconds on a Pi 3A+ would
  * cost far more than the icons are worth). */
-static lv_obj_t *ico_wifi, *ico_bt;
+static lv_obj_t *ico_wifi, *ico_bt, *lbl_cpu, *lbl_ram;
+
+/* CPU busy% between calls, from /proc/stat jiffies. Needs a previous
+ * sample to diff against, which the 5s tick supplies; the first call has
+ * nothing to compare and reports "--". */
+static int cpu_pct(void)
+{
+    static unsigned long long prev_tot, prev_idle;
+    unsigned long long u, n, sy, id, wa, hi, si, stl;
+    FILE *f = fopen("/proc/stat", "r");
+    if (!f) return -1;
+    int got = fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+                     &u, &n, &sy, &id, &wa, &hi, &si, &stl);
+    fclose(f);
+    if (got != 8) return -1;
+    unsigned long long idle = id + wa;
+    unsigned long long tot  = u + n + sy + id + wa + hi + si + stl;
+    unsigned long long dt = tot - prev_tot, di = idle - prev_idle;
+    int primed = prev_tot != 0;
+    prev_tot = tot; prev_idle = idle;
+    if (!primed || dt == 0) return -1;
+    return (int)((dt - di) * 100 / dt);
+}
+
+/* MiB in use. MemAvailable, not MemFree: on 424MB of RAM the page cache
+ * makes MemFree look alarming while the memory is in fact reclaimable. */
+static int ram_used_mb(void)
+{
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return -1;
+    char line[128];
+    unsigned long total = 0, avail = 0;
+    while (fgets(line, sizeof line, f)) {
+        if (!total) sscanf(line, "MemTotal: %lu kB", &total);
+        if (!avail) sscanf(line, "MemAvailable: %lu kB", &avail);
+        if (total && avail) break;
+    }
+    fclose(f);
+    return total ? (int)((total - avail) / 1024) : -1;
+}
 
 static int wifi_up(void)
 {
@@ -718,6 +757,17 @@ static void refresh_status_icons(void)
         lv_obj_set_style_text_color(ico_wifi, lv_color_hex(wifi_up() ? C_OK_FILL : C_MUTED), 0);
     if (ico_bt)
         lv_obj_set_style_text_color(ico_bt, lv_color_hex(bt_connected() ? C_OK_FILL : C_MUTED), 0);
+
+    if (lbl_cpu) {
+        int c = cpu_pct();
+        if (c < 0) lv_label_set_text(lbl_cpu, "CPU --");
+        else       lv_label_set_text_fmt(lbl_cpu, "CPU %d%%", c);
+    }
+    if (lbl_ram) {
+        int m = ram_used_mb();
+        if (m < 0) lv_label_set_text(lbl_ram, "RAM --");
+        else       lv_label_set_text_fmt(lbl_ram, "RAM %dM", m);
+    }
 }
 
 static void build_rail(lv_obj_t *parent)
@@ -741,14 +791,19 @@ static void build_rail(lv_obj_t *parent)
 
     /* Status icons sit at the foot of the rail, clear of the three nav
      * items (which end at y=297). Labels, so they are not clickable. */
-    static const struct { const char *sym; int y; lv_obj_t **out; } st[] = {
-        { LV_SYMBOL_WIFI,      SCR_H - 122, &ico_wifi },
-        { LV_SYMBOL_BLUETOOTH, SCR_H -  66, &ico_bt   },
+    static const struct {
+        const char *sym; int y; const lv_font_t *font; uint32_t col; lv_obj_t **out;
+    } st[] = {
+        { LV_SYMBOL_WIFI,      SCR_H - 170, &lv_font_montserrat_28, C_MUTED, &ico_wifi },
+        { LV_SYMBOL_BLUETOOTH, SCR_H - 126, &lv_font_montserrat_28, C_MUTED, &ico_bt   },
+        { "CPU --",            SCR_H -  72, &lv_font_montserrat_14, C_TEXT,  &lbl_cpu  },
+        { "RAM --",            SCR_H -  48, &lv_font_montserrat_14, C_TEXT,  &lbl_ram  },
     };
     for (unsigned i = 0; i < sizeof st / sizeof st[0]; i++) {
         lv_obj_t *l = lv_label_create(rail);
         lv_label_set_text(l, st[i].sym);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_font(l, st[i].font, 0);
+        lv_obj_set_style_text_color(l, lv_color_hex(st[i].col), 0);
         lv_obj_set_width(l, RAIL_W);
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(l, 0, st[i].y);
