@@ -46,14 +46,14 @@
  * by 720/382 ~ 1.885 throughout. */
 #define SCR_W    1280
 #define SCR_H    720
-#define RAIL_W   120
+#define RAIL_W   92
 #define PAD      40
 #define BODY_X   (RAIL_W + PAD)
 #define BODY_W   (SCR_W - RAIL_W - 2 * PAD)
 #define BODY_H   (SCR_H - 2 * PAD)
-#define PHOTO_W  400
+#define PHOTO_W  480     /* 480x640 = 3:4, matching portrait photos */
 #define PHOTO_H  BODY_H   /* fills the body, bottom-aligned with the week card */
-#define GAP      38
+#define GAP      24
 #define RIGHT_X  (PHOTO_W + GAP)
 #define RIGHT_W  (BODY_W - RIGHT_X)
 #define BTN_W    ((RIGHT_W - 22) / 2)
@@ -779,12 +779,12 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_set_style_border_width(rail, 1, 0);
 
     for (int i = 0; i < 3; i++) {
-        lv_obj_t *it = box(rail, 18, 22 + i * 96, 83, 83, C_ACC_BG, 18);
+        lv_obj_t *it = box(rail, 14, 20 + i * 80, 64, 64, C_ACC_BG, 16);
         lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(it, rail_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         lv_obj_t *l = lv_label_create(it);
         lv_label_set_text(l, icons[i]);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_40, 0);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_32, 0);
         lv_obj_center(l);
         rail_items[i] = it;
     }
@@ -931,6 +931,10 @@ static void build_home(lv_obj_t *s)
     lv_obj_set_size(btn_dose, bw, 120);
     lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
     lv_obj_set_style_radius(btn_dose, 16, 0);
+    /* Explicit, so the fit is arithmetic rather than theme-dependent:
+     * BTN_W 291 - 20 = 271 usable, and the widest label
+     * "<refresh>  Undo today's dose" measures 257 at montserrat_24. */
+    lv_obj_set_style_pad_hor(btn_dose, 10, 0);
     lv_obj_add_event_cb(btn_dose, dose_cb, LV_EVENT_CLICKED, NULL);
     /* Icon + label in a flex row. LVGL's symbol font has no pill glyph, so
      * it is a small PNG loaded at runtime like the photos - flex skips
@@ -967,6 +971,7 @@ static void build_home(lv_obj_t *s)
     lv_obj_set_style_bg_opa(b2, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(b2, 0, 0);
     lv_obj_set_style_radius(b2, 16, 0);
+    lv_obj_set_style_pad_hor(b2, 10, 0);
     lv_obj_add_event_cb(b2, event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l2 = text(b2, 0, 0, LV_SYMBOL_WARNING "  Log event", &lv_font_montserrat_28, C_TEXT);
     lv_obj_center(l2);
