@@ -34,8 +34,9 @@ $(OBJS): lv_conf.h
 clean:
 	rm -f $(OBJS) app
 
-# The date and schedule math, checked without LVGL or a panel.
+# Logic checked without LVGL or a panel.
 test:
 	@$(CC) -Wall -Wextra -I. -o /tmp/sched_test test_sched.c && /tmp/sched_test
+	@$(CC) -Wall -Wextra -I. -o /tmp/touch_test test_touch.c && /tmp/touch_test
 
 .PHONY: clean test

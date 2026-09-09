@@ -22,6 +22,7 @@
 #include <glob.h>
 #include <lvgl/lvgl.h>
 #include "src/ui.h"
+#include "src/touch.h"
 
 #define FB_DEV     "/dev/fb0"
 
@@ -92,17 +93,21 @@ static void fb_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *colo
 
 static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
-    static int raw_x = 0, raw_y = 0, pressed = 0;
+    static int raw_x = 0, raw_y = 0, hw_pressed = 0, deferred = 0;
     struct input_event ev;
+    int saw_press = 0;
 
     while (read(touch_fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
         if (ev.type == EV_ABS) {
             if (ev.code == ABS_X || ev.code == ABS_MT_POSITION_X) raw_x = ev.value;
             else if (ev.code == ABS_Y || ev.code == ABS_MT_POSITION_Y) raw_y = ev.value;
         } else if (ev.type == EV_KEY && ev.code == BTN_TOUCH) {
-            pressed = ev.value;
+            if (ev.value) saw_press = 1;
+            hw_pressed = ev.value;
         }
     }
+
+    int pressed = touch_latch(saw_press, hw_pressed, &deferred);
 
     /* raw -> panel-native pixels */
     int nx = (int)((long)raw_x * (PANEL_W - 1) / t_max_x);
