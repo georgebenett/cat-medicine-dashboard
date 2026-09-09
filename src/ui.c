@@ -816,8 +816,8 @@ static void build_rail(lv_obj_t *parent)
  * single cat.png) and restart, no rebuild. They shuffle like a digital
  * portrait - see photo_secs in cat_cfg.txt. */
 #define MAX_PHOTOS 64
-#define PHOTO_PAD  24
-#define PHOTO_RADIUS 12      /* card radius 20 less the 12px inset, so it stays concentric */
+#define PHOTO_PAD  5       /* per side, so the photo sits just inside the card */
+#define PHOTO_RADIUS 15      /* card radius 20 less the 5px inset, so it stays concentric */
 
 static char      photo_src[MAX_PHOTOS][288];
 static int       n_photos, photo_i;
@@ -870,24 +870,32 @@ static void photo_show(int i)
     /* Each photo has its own dimensions, so the zoom is per-photo. Scale
      * down to fit; never upscale, a small photo would just blur. */
     if (lv_img_decoder_get_info(photo_src[i], &hdr) == LV_RES_OK && hdr.w > 0 && hdr.h > 0) {
-        /* Fit inside both axes of the card. The old long-side-only version
-         * was fine while the card was square; it is not any more. */
-        int zx = 256 * (PHOTO_W - PHOTO_PAD) / hdr.w;
-        int zy = 256 * (PHOTO_H - PHOTO_PAD) / hdr.h;
-        int zoom = zx < zy ? zx : zy;
-        if (zoom > 256) zoom = 256;      /* never upscale, it would just blur */
-        if (zoom < 16)  zoom = 16;
-        /* At exactly 256 lv_img takes its plain blit path and skips the
-         * transform entirely, so the photos are pre-scaled to land here. */
+        /* Cover, not fit: scale so the photo covers BOTH axes and let the
+         * wrapper clip whatever hangs over. Upscaling is allowed now -
+         * filling the card edge to edge is the point - so a photo smaller
+         * than the window softens rather than letterboxing. */
+        const int vw = PHOTO_W - 2 * PHOTO_PAD, vh = PHOTO_H - 2 * PHOTO_PAD;
+        /* Round the zoom UP: truncating leaves a 1-2px sliver of card
+         * showing along one edge, which is exactly what cover must not do. */
+        int zx = (256 * vw + hdr.w - 1) / hdr.w;
+        int zy = (256 * vh + hdr.h - 1) / hdr.h;
+        int zoom = zx > zy ? zx : zy;
+        if (zoom < 16)   zoom = 16;
+        if (zoom > 1024) zoom = 1024;
         lv_img_set_zoom(photo_img, (uint16_t)zoom);
-        if (zoom != 256) printf("photo %d: zoom %d, transforming every draw\n", i, zoom);
+        if (zoom > 256)
+            printf("photo %d: %dx%d upscaled to %d%% - re-export at >=%dx%d to keep it sharp\n",
+                   i, hdr.w, hdr.h, zoom * 100 / 256, vw, vh);
 
         /* Round the picture's own corners. clip_corner masks an object's
          * CHILDREN, so the mask has to live on a wrapper sized to the drawn
          * image - the card is bigger than the photo, so its corners are
          * nowhere near them. lv_img_get_transformed_size is not public in
          * 8.3, but zoom and the header give the same answer. */
-        lv_obj_set_size(photo_wrap, hdr.w * zoom / 256, hdr.h * zoom / 256);
+        /* The wrapper is now the visible window, fixed to the card rather
+         * than sized to the image, so LVGL's default child clipping crops
+         * the overflow to it. */
+        lv_obj_set_size(photo_wrap, vw, vh);
         lv_obj_center(photo_wrap);
     }
     lv_obj_center(photo_img);
