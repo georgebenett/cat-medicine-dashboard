@@ -30,7 +30,7 @@ make -s -j2                                # -s: the link line is 300 object pat
 changed=0
 for u in lvglapp.service cat-backup.service cat-backup.timer \
          cat-weather.service cat-weather.timer \
-         cat-wifi.service cat-wifi.timer; do
+         cat-wifi.service cat-wifi.timer cat-dim.service; do
     if ! cmp -s "$u" "/etc/systemd/system/$u"; then
         sudo cp "$u" "/etc/systemd/system/$u"
         echo "unit updated: $u"
@@ -41,7 +41,7 @@ if [ "$changed" = 1 ]; then
     sudo systemctl daemon-reload
     # cat-backup.service is oneshot and triggered by its timer, so only the
     # dashboard and the timer are enabled at boot.
-    sudo systemctl enable lvglapp cat-backup.timer cat-weather.timer cat-wifi.timer
+    sudo systemctl enable lvglapp cat-backup.timer cat-weather.timer cat-wifi.timer cat-dim.service
     sudo systemctl start cat-backup.timer cat-weather.timer cat-wifi.timer
 fi
 

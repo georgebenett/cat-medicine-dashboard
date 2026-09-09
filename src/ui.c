@@ -78,7 +78,7 @@ static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fr
 static char cat_name[64] = "Kim";    /* sized to match the cfg value buffer */
 static int  dim_min = 5;                                 /* 0 = never dim */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
-static int  backlight_pct = 70;                          /* remembered across restarts */
+static int  backlight_pct = 50;                          /* remembered across restarts */
 static int  photo_secs = 60;                             /* portrait shuffle interval */
 static char cfg_lat[64] = "55.6078";   /* sized to the cfg value buffer */
 static char cfg_lon[64] = "12.9982";   /* weather.py reads both */
@@ -270,12 +270,6 @@ static const evt_t *evt_on_day(long dn, char t)
 {
     for (int i = n_evts - 1; i >= 0; i--)
         if (evts[i].t == t && evt_day(&evts[i]) == dn) return &evts[i];
-    return NULL;
-}
-
-static const evt_t *last_of(char t)
-{
-    for (int i = n_evts - 1; i >= 0; i--) if (evts[i].t == t) return &evts[i];
     return NULL;
 }
 
@@ -1455,11 +1449,12 @@ void ui_init(void)
     if (getenv("CAT_POPUP")) lv_obj_clear_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
     if (getenv("CAT_TOAST")) { toast(getenv("CAT_TOAST")); toast_until = 0; }  /* 0 = stays up */
 
-    /* Push the remembered brightness to the panel. Without this a restart
-     * while dimmed would leave it at raw 1 with no sign of why. */
-    ui_backlight_apply(backlight_pct);
-    printf("backlight restored to %d%%\n", backlight_pct);
+    /* main.c fades up to this once the UI is built; applying it here would
+     * light the panel before there was anything on it. */
+    printf("backlight target %d%%\n", backlight_pct);
 }
+
+int ui_backlight_pct(void) { return backlight_pct; }
 
 void ui_tick(void)
 {
@@ -1468,6 +1463,11 @@ void ui_tick(void)
 
     time_t now = time(NULL);
     if (now == last_sec) return;             /* the loop runs at ~200Hz; this needs 1Hz */
+    /* The Pi has no RTC, so at boot the clock is whatever was saved at
+     * shutdown until timesyncd corrects it - a jump of minutes or hours.
+     * Without this the display waited for the minute to roll before
+     * catching up, which is the delay you see on a cold start. */
+    int jumped = last_sec != 0 && (now < last_sec || now - last_sec > 2);
     last_sec = now;
     blink_on = !blink_on;
 
@@ -1502,7 +1502,7 @@ void ui_tick(void)
     if (status_dot && overdue_now)
         lv_obj_set_style_bg_opa(status_dot, blink_on ? LV_OPA_COVER : LV_OPA_30, 0);
 
-    if (t.tm_min != last_min) {
+    if (jumped || t.tm_min != last_min) {
         last_min = t.tm_min;
         if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
         if (cur_screen == 2) refresh_settings(&t);

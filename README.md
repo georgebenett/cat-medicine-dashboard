@@ -86,6 +86,17 @@ to change it.
 `photos/` and `cat.png` are gitignored: they are personal and this repo
 has a public remote. Copy them over with scp instead.
 
+## Backlight at boot
+
+The panel is held dark from the first line of `main()` and by
+`cat-dim.service`, which runs early in boot before the console appears.
+Once `ui_init()` has built the UI, `main()` fades up to the remembered
+brightness over ~1.2s, writing sysfs only when the value actually
+changes.
+
+Default brightness is 50%. The remembered value in `cat_cfg.txt` wins, so
+setting the slider lower keeps it lower across reboots.
+
 ## Power
 
 This Pi browns out. `vcgencmd get_throttled` returns `0x50000`: bit 16

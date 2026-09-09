@@ -1,0 +1,16 @@
+[Unit]
+Description=Dim the panel backlight early in boot
+DefaultDependencies=no
+After=sysinit.target
+Before=basic.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The dashboard fades up once it has something to show; until then the panel
+# stays dark rather than lighting a console nobody reads. Glob guarded: on a
+# board with no backlight the loop would otherwise write to a literal path.
+ExecStart=/bin/sh -c 'for b in /sys/class/backlight/*/brightness; do [ -e "$$b" ] && echo 1 > "$$b"; done; exit 0'
+
+[Install]
+WantedBy=sysinit.target

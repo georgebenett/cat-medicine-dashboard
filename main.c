@@ -204,6 +204,11 @@ int main(void)
     struct fb_var_screeninfo vinfo;
     struct fb_fix_screeninfo finfo;
 
+    /* Panel dark before a single pixel is drawn, so boot and UI construction
+     * happen unlit. It fades up once there is something worth looking at. */
+    backlight_find();
+    backlight_set_raw(1);
+
     fbfd = open(FB_DEV, O_RDWR);
     if (fbfd < 0) { perror("open " FB_DEV); return 1; }
     if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo) < 0) { perror("VSCREENINFO"); return 1; }
@@ -252,10 +257,17 @@ int main(void)
     printf("lvgl reports %dx%d\n", (int)lv_disp_get_hor_res(NULL),
            (int)lv_disp_get_ver_res(NULL));
 
-    /* Before ui_init: it applies the remembered brightness on the way up. */
-    backlight_find();
-
     ui_init();
+
+    /* Fade up over ~1.2s. Here rather than in ui.c because main.c owns the
+     * sysfs backlight and the loop below is what keeps LVGL drawing while
+     * the fade runs. Only written when the value actually changes - at loop
+     * speed this would otherwise be a few hundred sysfs writes. */
+    const int fade_to  = ui_backlight_pct();
+    const int fade_top = bl_max > 0 ? bl_max * fade_to / 100 : 0;
+    const uint32_t fade_ms = 1200;
+    uint32_t fade_start = millis();
+    int fading = fade_top > 1, last_raw = 1;
 
     /* Debug cursor on the system layer: shows where LVGL believes the
      * pointer is. Set TOUCH_CURSOR=0 to hide it once calibration is done. */
@@ -280,6 +292,19 @@ int main(void)
         prev = now;
         lv_timer_handler();
         ui_tick();
+
+        if (fading) {
+            uint32_t el = millis() - fade_start;
+            if (el >= fade_ms) {
+                backlight_set_pct(fade_to);
+                fading = 0;
+                printf("faded up to %d%%\n", fade_to);
+            } else {
+                int raw = 1 + (int)((long)(fade_top - 1) * el / fade_ms);
+                if (raw != last_raw) { backlight_set_raw(raw); last_raw = raw; }
+            }
+        }
+
         usleep(5000);
     }
     return 0;

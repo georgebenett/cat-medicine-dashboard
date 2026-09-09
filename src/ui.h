@@ -7,5 +7,8 @@
  * panel goes while still lit, used for idle dimming. */
 void ui_backlight_apply(int pct);
 
+/* The remembered brightness, for main.c to fade up to after ui_init. */
+int  ui_backlight_pct(void);
+
 void ui_init(void);
 void ui_tick(void);
