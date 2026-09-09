@@ -850,7 +850,10 @@ static void build_home(lv_obj_t *s)
     else printf("pill.png missing - button shows text only\n");
 
     lbl_btn_dose = lv_label_create(row);
-    lv_obj_set_style_text_font(lbl_btn_dose, &lv_font_montserrat_28, 0);
+    /* 24, not 28: the button is BTN_W (310px) wide and the toggled label
+     * "<refresh>  Undo today's dose" overflows at 28. Same size in both
+     * states so the button does not visibly resize its text on tap. */
+    lv_obj_set_style_text_font(lbl_btn_dose, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_ACC_ON), 0);
     lv_label_set_text(lbl_btn_dose, "Log dose given");
 
