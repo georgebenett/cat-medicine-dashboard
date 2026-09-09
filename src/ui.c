@@ -683,6 +683,43 @@ static void export_cb(lv_event_t *e)
 
 /* --- screens -------------------------------------------------------- */
 
+/* Rail link-status icons ------------------------------------------------
+ * Green when up, grey when not. Both checks are one cheap sysfs lookup, so
+ * they run straight off the 1Hz tick with no helper thread or polling of
+ * nmcli/bluetoothctl (spawning those every few seconds on a Pi 3A+ would
+ * cost far more than the icons are worth). */
+static lv_obj_t *ico_wifi, *ico_bt;
+
+static int wifi_up(void)
+{
+    char st[16] = { 0 };
+    FILE *f = fopen("/sys/class/net/wlan0/operstate", "r");
+    if (!f) return 0;
+    char *ok = fgets(st, sizeof st, f);
+    fclose(f);
+    return ok && strncmp(st, "up", 2) == 0;
+}
+
+static int bt_connected(void)
+{
+    /* Every live connection is a /sys/class/bluetooth/hci0/hci0:<handle>
+     * directory, so the glob answers "is anything connected" without
+     * naming a specific device. */
+    glob_t g;
+    int n = 0;
+    if (glob("/sys/class/bluetooth/hci0/hci0:*", 0, NULL, &g) == 0) n = (int)g.gl_pathc;
+    globfree(&g);
+    return n > 0;
+}
+
+static void refresh_status_icons(void)
+{
+    if (ico_wifi)
+        lv_obj_set_style_text_color(ico_wifi, lv_color_hex(wifi_up() ? C_OK_FILL : C_MUTED), 0);
+    if (ico_bt)
+        lv_obj_set_style_text_color(ico_bt, lv_color_hex(bt_connected() ? C_OK_FILL : C_MUTED), 0);
+}
+
 static void build_rail(lv_obj_t *parent)
 {
     static const char *icons[3] = { LV_SYMBOL_HOME, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS };
@@ -701,6 +738,23 @@ static void build_rail(lv_obj_t *parent)
         lv_obj_center(l);
         rail_items[i] = it;
     }
+
+    /* Status icons sit at the foot of the rail, clear of the three nav
+     * items (which end at y=297). Labels, so they are not clickable. */
+    static const struct { const char *sym; int y; lv_obj_t **out; } st[] = {
+        { LV_SYMBOL_WIFI,      SCR_H - 122, &ico_wifi },
+        { LV_SYMBOL_BLUETOOTH, SCR_H -  66, &ico_bt   },
+    };
+    for (unsigned i = 0; i < sizeof st / sizeof st[0]; i++) {
+        lv_obj_t *l = lv_label_create(rail);
+        lv_label_set_text(l, st[i].sym);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
+        lv_obj_set_width(l, RAIL_W);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(l, 0, st[i].y);
+        *st[i].out = l;
+    }
+    refresh_status_icons();
 }
 
 /* Photos are files, not compiled-in C arrays: drop PNGs in photos/ (or a
@@ -1365,6 +1419,11 @@ void ui_tick(void)
     if (now == last_sec) return;             /* the loop runs at ~200Hz; this needs 1Hz */
     last_sec = now;
     blink_on = !blink_on;
+
+    /* Link state changes on its own schedule, so it needs its own cadence
+     * rather than riding the once-a-minute redraw. */
+    static int status_cd;
+    if (--status_cd <= 0) { status_cd = 5; refresh_status_icons(); }
 
     struct tm t = *localtime(&now);
 
