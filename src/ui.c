@@ -52,7 +52,7 @@
 #define BODY_W   (SCR_W - RAIL_W - 2 * PAD)
 #define BODY_H   (SCR_H - 2 * PAD)
 #define PHOTO_W  400
-#define PHOTO_H  540      /* 3:4-ish, to match the photos rather than crop them */
+#define PHOTO_H  BODY_H   /* fills the body, bottom-aligned with the week card */
 #define GAP      38
 #define RIGHT_X  (PHOTO_W + GAP)
 #define RIGHT_W  (BODY_W - RIGHT_X)
@@ -348,7 +348,7 @@ static lv_obj_t *rail_items[3];
  * colour, which drowned the vomiting marks in a wall of green. */
 typedef struct { lv_obj_t *cell, *num, *dots, *dot[2]; } daycell_t;
 
-static lv_obj_t *lbl_name, *lbl_last_dose, *card_status, *lbl_status, *lbl_status_sub;
+static lv_obj_t *card_status, *lbl_status, *lbl_status_sub;
 static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *icon_dose, *week_wd[7];
 static lv_obj_t *lbl_week_no, *lbl_home_clock, *pop_event;
 static lv_obj_t *lbl_home_date, *wx_img, *lbl_wx_temp, *lbl_wx_desc;
@@ -918,12 +918,6 @@ static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 static void build_home(lv_obj_t *s)
 {
     build_photo(s, 0, 0, PHOTO_W, PHOTO_H);
-    lbl_name = text(s, 0, PHOTO_H + 18, "", &lv_font_montserrat_32, C_TEXT);
-    lv_obj_set_width(lbl_name, PHOTO_W);
-    lv_obj_set_style_text_align(lbl_name, LV_TEXT_ALIGN_CENTER, 0);
-    lbl_last_dose = text(s, 0, PHOTO_H + 62, "", &lv_font_montserrat_20, C_TEXT2);
-    lv_obj_set_width(lbl_last_dose, PHOTO_W);
-    lv_obj_set_style_text_align(lbl_last_dose, LV_TEXT_ALIGN_CENTER, 0);
 
     card_status = box(s, RIGHT_X, 0, RIGHT_W, 160, C_SURF1, 20);
     status_dot     = dot(card_status, 14, C_OK_FILL);
@@ -1230,17 +1224,6 @@ static void refresh_home(const struct tm *t, long today)
     char buf[256];
     int is_med_day = (med_mask >> t->tm_wday) & 1;
     const evt_t *given = evt_on_day(today, 'm');
-    const evt_t *last  = last_of('m');
-
-    lv_label_set_text(lbl_name, cat_name);
-    if (last) {
-        long dn = evt_day(last);
-        snprintf(buf, sizeof buf, "Last dose: %s %d %s, %02d:%02d",
-                 DAY3[sched_wday(dn)], last->d, MON3[last->mo - 1], last->h, last->mi);
-    } else {
-        snprintf(buf, sizeof buf, "No dose logged yet");
-    }
-    lv_label_set_text(lbl_last_dose, buf);
 
     long mon = sched_monday(today);
     int done = count_between(mon, mon + 6, 'm');
