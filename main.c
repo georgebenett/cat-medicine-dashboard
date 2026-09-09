@@ -170,14 +170,10 @@ static void backlight_set_pct(int pct)
     backlight_set_raw(pct * bl_max / 100);
 }
 
-/* src/ui.c dims the panel when the display goes idle. pct <= 0 means the
- * dimmest the panel will go while still lit, deliberately below the
- * BL_MIN_PCT floor that keeps the slider usable. */
-void ui_backlight_apply(int pct)
-{
-    if (pct <= 0) backlight_set_raw(1);
-    else          backlight_set_pct(pct);
-}
+/* src/ui.c dims the panel when the display goes idle. Always a percentage
+ * now: the near-off level is only used at boot, and that path calls
+ * backlight_set_raw() directly from main(). */
+void ui_backlight_apply(int pct) { backlight_set_pct(pct); }
 
 static uint32_t millis(void)
 {

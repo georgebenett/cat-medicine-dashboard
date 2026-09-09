@@ -3,8 +3,8 @@
 #include <lvgl/lvgl.h>
 
 /* Implemented in main.c, which owns the sysfs backlight. src/ui.c owns the
- * slider and the remembered brightness. pct <= 0 means the dimmest the
- * panel goes while still lit, used for idle dimming. */
+ * slider and the remembered brightness. Percentage only - it is clamped to
+ * BL_MIN_PCT, so it can never blank the panel. */
 void ui_backlight_apply(int pct);
 
 /* The remembered brightness, for main.c to fade up to after ui_init. */

@@ -40,6 +40,7 @@ are readable and editable without this app, and both are gitignored
     cat_cfg.txt    days=42                   medicine-day bitmask, bit0=Sunday
                    name=Mimi
                    dim=5                     idle minutes before dimming, 0=never
+                   dim_pct=15                idle brightness, never above the awake one
                    backlight=70              remembered brightness, restored at startup
                    reminder=1                flash the status card when overdue
                    reminder_h=9              reminder time; no picker in the UI
@@ -49,10 +50,13 @@ Default schedule is Mon/Wed/Fri - three a week. Change it in Settings,
 not in the source. A bare integer in cat_cfg.txt is still read as the day
 mask, which is what the first version of this file held.
 
-Idle dimming uses LVGL's own `lv_disp_get_inactive_time()`. It drops the
-panel to the dimmest the hardware will go while still lit - deliberately
-below the `BL_MIN_PCT` floor that keeps the slider visible - and restores
-the slider's brightness on the next touch.
+Idle dimming uses LVGL's own `lv_disp_get_inactive_time()`. It drops to
+`dim_pct` (15% by default), which is still readable across the room, and
+restores the slider's brightness on the next touch. It never dims *up*:
+if the slider is below `dim_pct`, that lower value is used instead.
+
+The near-off level (raw 1) is only used during boot, before the UI has
+anything to show.
 
 Paths are overridable: `CAT_LOG`, `CAT_CFG`, `CAT_IMG`.
 

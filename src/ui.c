@@ -77,6 +77,7 @@ static int   n_evts;
 static int  med_mask = (1 << 1) | (1 << 3) | (1 << 5);   /* bit0=Sun; Mon/Wed/Fri */
 static char cat_name[64] = "Kim";    /* sized to match the cfg value buffer */
 static int  dim_min = 5;                                 /* 0 = never dim */
+static int  dim_pct = 15;                                /* idle level, not off */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
 static int  photo_secs = 60;                             /* portrait shuffle interval */
@@ -162,6 +163,7 @@ static void cfg_load(void)
         if      (!strcmp(k, "days"))       { int m = atoi(v); if (m >= 0 && m < 128) med_mask = m; }
         else if (!strcmp(k, "name"))       snprintf(cat_name, sizeof cat_name, "%s", v);
         else if (!strcmp(k, "dim"))        { int m = atoi(v); if (m >= 0 && m <= 60) dim_min = m; }
+        else if (!strcmp(k, "dim_pct"))    { int p = atoi(v); if (p >= 5 && p <= 60) dim_pct = p; }
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
         else if (!strcmp(k, "photo_secs")) { int s = atoi(v); if (s >= 5 && s <= 3600) photo_secs = s; }
         else if (!strcmp(k, "lat"))        snprintf(cfg_lat, sizeof cfg_lat, "%s", v);
@@ -180,9 +182,9 @@ static void cfg_save(void)
     /* lat/lon are written back even though nothing in the UI edits them:
      * cfg_save rewrites the whole file, so a key it does not know about
      * would be silently dropped the first time a setting changed. */
-    fprintf(f, "days=%d\nname=%s\ndim=%d\nbacklight=%d\nphoto_secs=%d\n"
+    fprintf(f, "days=%d\nname=%s\ndim=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n",
-            med_mask, cat_name, dim_min, backlight_pct, photo_secs,
+            med_mask, cat_name, dim_min, dim_pct, backlight_pct, photo_secs,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon);
     fclose(f);
 }
@@ -1488,8 +1490,14 @@ void ui_tick(void)
     if (dim_min > 0) {
         int idle = lv_disp_get_inactive_time(NULL) > (uint32_t)dim_min * 60000;
         if (idle != dimmed) {
+            int awake = (int)lv_slider_get_value(ui_backlight_slider);
+            /* Dim to a level that is still readable across the room, not to
+             * the near-off used during boot. Never brighter than the awake
+             * setting: dimming up if the slider is below dim_pct would be
+             * absurd. */
+            int low = dim_pct < awake ? dim_pct : awake;
             dimmed = idle;
-            ui_backlight_apply(idle ? 0 : (int)lv_slider_get_value(ui_backlight_slider));
+            ui_backlight_apply(idle ? low : awake);
         }
     } else if (dimmed) {
         dimmed = 0;
