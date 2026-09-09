@@ -87,8 +87,12 @@ rotate accordingly - a blanket rotation leaves some upside down.
 built-in symbol font has no pill glyph. Drop a different 44x44 PNG there
 to change it.
 
-`photos/` and `cat.png` are gitignored: they are personal and this repo
-has a public remote. Copy them over with scp instead.
+`photos/` and `cat.png` are gitignored - 6MB of binaries that get
+re-exported whenever the card geometry changes would bloat the history,
+and they are regenerable from the originals. Copy them over with scp.
+
+They therefore live only on the SD card. Given this Pi browns out, keep
+the originals somewhere else.
 
 ## Backlight at boot
 

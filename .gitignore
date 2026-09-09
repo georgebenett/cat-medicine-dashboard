@@ -10,6 +10,7 @@ app
 cat_log.csv
 cat_cfg.txt
 
-# her photos - personal, and this repo has a public remote
+# her photos - 6MB of binaries, re-exported whenever the card geometry
+# changes, and regenerable from the originals. Copied over with scp.
 photos/
 cat.png
