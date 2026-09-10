@@ -82,6 +82,10 @@ static int  dim_pct = 15;                                /* idle level, not off 
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
 static int  photo_secs = 60;                             /* portrait shuffle interval */
+static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these */
+static char cfg_tfrom[64] = "";
+static char cfg_tto[64]   = "";
+static int  transit_h1 = 7, transit_h2 = 10;
 static char cfg_lat[64] = "55.6078";   /* sized to the cfg value buffer */
 static char cfg_lon[64] = "12.9982";   /* weather.py reads both */
 
@@ -182,6 +186,11 @@ static void cfg_load(void)
         else if (!strcmp(k, "photo_secs")) { int s = atoi(v); if (s >= 5 && s <= 3600) photo_secs = s; }
         else if (!strcmp(k, "lat"))        snprintf(cfg_lat, sizeof cfg_lat, "%s", v);
         else if (!strcmp(k, "lon"))        snprintf(cfg_lon, sizeof cfg_lon, "%s", v);
+        else if (!strcmp(k, "transit_key"))  snprintf(cfg_tkey, sizeof cfg_tkey, "%s", v);
+        else if (!strcmp(k, "transit_from")) snprintf(cfg_tfrom, sizeof cfg_tfrom, "%s", v);
+        else if (!strcmp(k, "transit_to"))   snprintf(cfg_tto, sizeof cfg_tto, "%s", v);
+        else if (!strcmp(k, "transit_h1"))   { int h = atoi(v); if (h >= 0 && h < 24) transit_h1 = h; }
+        else if (!strcmp(k, "transit_h2"))   { int h = atoi(v); if (h >= 0 && h <= 24) transit_h2 = h; }
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
         else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
@@ -197,9 +206,12 @@ static void cfg_save(void)
      * cfg_save rewrites the whole file, so a key it does not know about
      * would be silently dropped the first time a setting changed. */
     fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
-               "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n",
+               "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
+               "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
+               "transit_h1=%d\ntransit_h2=%d\n",
             med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct, photo_secs,
-            reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon);
+            reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
+            cfg_tkey, cfg_tfrom, cfg_tto, transit_h1, transit_h2);
     fclose(f);
 }
 
@@ -255,6 +267,53 @@ static const char *wx_words(int code)
         case 95: case 96: case 99: return "Thunderstorm";
         default: return "";
     }
+}
+
+/* --- transit ---------------------------------------------------------
+ * transit.py writes transit.txt; this only reads it. Shown on weekday
+ * mornings in place of the week strip - at 07:30 the next bus matters
+ * more than how the week has gone. */
+
+#define MAX_TRIPS 3
+static struct { char dep[8], arr[8], line[28]; int mins, changes; } trips[MAX_TRIPS];
+static int  n_trips;
+static long transit_updated;
+
+static void transit_load(void)
+{
+    FILE *f = fopen(env_or("CAT_TRANSIT", "transit.txt"), "r");
+    n_trips = 0;
+    transit_updated = 0;
+    if (!f) return;
+    char line[160];
+    while (fgets(line, sizeof line, f)) {
+        if (!strncmp(line, "updated=", 8)) { transit_updated = atol(line + 8); continue; }
+        if (strncmp(line, "trip=", 5) || n_trips >= MAX_TRIPS) continue;
+        char *p = line + 5, *tok;
+        char *save = NULL;
+        int field = 0;
+        for (tok = strtok_r(p, "|\n", &save); tok && field < 5;
+             tok = strtok_r(NULL, "|\n", &save), field++) {
+            switch (field) {
+                case 0: snprintf(trips[n_trips].dep, sizeof trips[0].dep, "%s", tok); break;
+                case 1: snprintf(trips[n_trips].arr, sizeof trips[0].arr, "%s", tok); break;
+                case 2: trips[n_trips].mins = atoi(tok); break;
+                case 3: trips[n_trips].changes = atoi(tok); break;
+                case 4: snprintf(trips[n_trips].line, sizeof trips[0].line, "%s", tok); break;
+            }
+        }
+        if (field >= 4) n_trips++;
+    }
+    fclose(f);
+}
+
+/* Weekday mornings only, and only while the data is worth trusting: a
+ * departure board ten minutes stale is worse than none. */
+static int transit_show(const struct tm *t)
+{
+    if (n_trips == 0 || t->tm_wday == 0 || t->tm_wday == 6) return 0;
+    if (t->tm_hour < transit_h1 || t->tm_hour >= transit_h2) return 0;
+    return transit_updated && (long)time(NULL) - transit_updated < 15 * 60;
 }
 
 /* --- queries -------------------------------------------------------- */
@@ -362,6 +421,7 @@ static lv_obj_t *card_status, *lbl_status, *lbl_status_sub;
 static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *icon_dose, *week_wd[7];
 static lv_obj_t *lbl_week_no, *lbl_home_clock, *pop_event;
 static lv_obj_t *lbl_home_date, *wx_img, *lbl_wx_temp, *lbl_wx_desc;
+static lv_obj_t *card_week, *card_transit, *lbl_trip[MAX_TRIPS];
 static int overdue_now;
 static daycell_t week_cell[7], cal_cell[42];
 static lv_obj_t *lbl_cal_month;
@@ -970,6 +1030,7 @@ static void build_home(lv_obj_t *s)
     lv_obj_align(lbl_wx_desc, LV_ALIGN_RIGHT_MID, -100, 20);
 
     lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
+    card_week = wk;
     text(wk, 30, 22, "This week", &lv_font_montserrat_20, C_TEXT2);
     lbl_week_no = text(wk, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
     lv_obj_align(lbl_week_no, LV_ALIGN_TOP_RIGHT, -30, 22);
@@ -1021,6 +1082,20 @@ static void build_event_popover(void)
 
     pop_row(0, 2, LV_SYMBOL_WARNING, "Vomiting", C_BAD_TEXT, 'v');
     pop_row(1, 2, LV_SYMBOL_PLUS,    "Food",     C_TEXT,     'f');
+}
+
+/* Same rect as the week strip; refresh_home shows one or the other. The
+ * built-in font is ASCII plus a few symbols, so no arrow glyph and no
+ * Swedish vowels - LV_SYMBOL_RIGHT and plain spellings instead. */
+static void build_transit(lv_obj_t *s)
+{
+    card_transit = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
+    lv_obj_add_flag(card_transit, LV_OBJ_FLAG_HIDDEN);
+
+    text(card_transit, 30, 16, "Varnhem " LV_SYMBOL_RIGHT " Scheeleparken",
+         &lv_font_montserrat_20, C_TEXT2);
+    for (int i = 0; i < MAX_TRIPS; i++)
+        lbl_trip[i] = text(card_transit, 30, 54 + i * 42, "", &lv_font_montserrat_24, C_TEXT);
 }
 
 static void build_calendar(lv_obj_t *s)
@@ -1247,6 +1322,28 @@ static void refresh_home(const struct tm *t, long today)
                             (overdue && !blink_on) ? LV_OPA_30 : LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(lbl_status,
                                 lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
+    transit_load();
+    if (transit_show(t)) {
+        char row[128];
+        for (int i = 0; i < MAX_TRIPS; i++) {
+            if (i >= n_trips) { lv_label_set_text(lbl_trip[i], ""); continue; }
+            const char *ch = trips[i].changes == 0 ? "direct"
+                           : trips[i].changes == 1 ? "1 change" : NULL;
+            if (ch)
+                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   %d min " LV_SYMBOL_BULLET " %s",
+                         trips[i].dep, trips[i].arr, trips[i].mins, ch);
+            else
+                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   %d min " LV_SYMBOL_BULLET " %d changes",
+                         trips[i].dep, trips[i].arr, trips[i].mins, trips[i].changes);
+            lv_label_set_text(lbl_trip[i], row);
+        }
+        lv_obj_clear_flag(card_transit, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(card_week, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(card_transit, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(card_week, LV_OBJ_FLAG_HIDDEN);
+    }
+
     overdue_now = overdue;
     lv_label_set_text_fmt(lbl_week_no, "Week %d", sched_iso_week(today));
     lv_label_set_text_fmt(lbl_home_clock, "%02d:%02d", t->tm_hour, t->tm_min);
@@ -1408,6 +1505,7 @@ void ui_init(void)
         lv_obj_set_style_bg_opa(screens[i], LV_OPA_0, 0);
     }
     build_home(screens[0]);
+    build_transit(screens[0]);
     build_event_popover();
     build_calendar(screens[1]);
     build_settings(screens[2]);

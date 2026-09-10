@@ -156,6 +156,29 @@ NetworkManager is already `autoconnect=yes` with `autoconnect-retries=0`
 (forever), so this only covers the case where the supplicant is wedged
 rather than retrying. Check it with `journalctl -t wifi-watchdog`.
 
+## Transit
+
+Weekday mornings the week strip is replaced by the next three departures
+Varnhem -> Scheeleparken. Outside `transit_h1`..`transit_h2` (07-10), at
+weekends, or when the data is over 15 minutes old, the week strip comes
+back - a stale departure board is worse than none.
+
+Skanetrafiken shut their own API down in 2021, so this goes through
+Trafiklab's ResRobot v2.1 route planner, which aggregates it. It needs a
+free key from trafiklab.se:
+
+    transit_key=...      in cat_cfg.txt
+    transit_from=...     stop ids, see below
+    transit_to=...
+
+Find the stop ids once the key is in place:
+
+    ./transit.py --lookup "Malmo Varnhem"
+    ./transit.py --lookup "Lund Scheeleparken"
+
+`transit.py` only calls the API inside the window, so a weekday morning
+costs ~36 requests rather than 288 a day.
+
 ## Backing up the log
 
 `cat_log.csv` is the only irreplaceable thing here, and it lives on an SD

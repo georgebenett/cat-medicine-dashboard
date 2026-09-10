@@ -30,7 +30,8 @@ make -s -j2                                # -s: the link line is 300 object pat
 changed=0
 for u in lvglapp.service cat-backup.service cat-backup.timer \
          cat-weather.service cat-weather.timer \
-         cat-wifi.service cat-wifi.timer cat-dim.service; do
+         cat-wifi.service cat-wifi.timer cat-dim.service \
+         cat-transit.service cat-transit.timer; do
     if ! cmp -s "$u" "/etc/systemd/system/$u"; then
         sudo cp "$u" "/etc/systemd/system/$u"
         # Verify: a brownout mid-copy left cat-dim.service zero length once,
@@ -48,8 +49,9 @@ if [ "$changed" = 1 ]; then
     sudo systemctl daemon-reload
     # cat-backup.service is oneshot and triggered by its timer, so only the
     # dashboard and the timer are enabled at boot.
-    sudo systemctl enable lvglapp cat-backup.timer cat-weather.timer cat-wifi.timer cat-dim.service
-    sudo systemctl start cat-backup.timer cat-weather.timer cat-wifi.timer
+    sudo systemctl enable lvglapp cat-backup.timer cat-weather.timer cat-wifi.timer \
+        cat-dim.service cat-transit.timer
+    sudo systemctl start cat-backup.timer cat-weather.timer cat-wifi.timer cat-transit.timer
 fi
 
 sudo systemctl start lvglapp

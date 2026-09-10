@@ -1,0 +1,10 @@
+[Unit]
+Description=Fetch the morning commute departures
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=georges
+WorkingDirectory=/home/georges/lvgl_app
+ExecStart=/home/georges/lvgl_app/transit.py
