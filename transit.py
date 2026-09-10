@@ -8,6 +8,9 @@ trafiklab.se in cat_cfg.txt as transit_key.
 Only fetches inside the commute window - roughly 36 calls a weekday
 morning rather than 288 a day, which keeps it inside any free tier.
 
+Writes six trips, not three: the UI drops any departure closer than
+transit_lead minutes, and filtering here would go stale between runs.
+
   ./transit.py --lookup "Malmo Varnhem"   find a stop id
 """
 import json, os, sys, time, urllib.parse, urllib.request
@@ -57,13 +60,13 @@ if now.weekday() >= 5 or not (h1 <= now.hour < h2):
     sys.exit(0)
 
 try:
-    d = api('trip', originId=ORIGIN, destId=DEST, numF=4)
+    d = api('trip', originId=ORIGIN, destId=DEST, numF=8)
 except Exception as e:
     print("transit fetch failed: %s" % e, file=sys.stderr)
     sys.exit(0)          # keep the old file; the UI ages it out on its own
 
 lines = []
-for trip in d.get('Trip', [])[:3]:
+for trip in d.get('Trip', [])[:6]:
     legs = [l for l in trip.get('LegList', {}).get('Leg', []) if l.get('type') != 'WALK']
     if not legs:
         continue

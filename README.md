@@ -170,11 +170,22 @@ free key from trafiklab.se:
     transit_key=...      in cat_cfg.txt
     transit_from=...     stop ids, see below
     transit_to=...
+    transit_lead=8       minutes needed to reach the stop
 
 Find the stop ids once the key is in place:
 
     ./transit.py --lookup "Malmo Varnhem"
     ./transit.py --lookup "Lund Scheeleparken"
+
+Departures closer than `transit_lead` minutes are dropped - a bus you
+cannot reach is noise. That filter lives in the UI, not in `transit.py`:
+the file is rewritten every five minutes but read every minute, so a
+departure that was catchable at fetch time is not by the time it is
+drawn. `transit.py` fetches six trips so three survive the filter.
+
+Each row shows the countdown rather than the journey length, since the
+arrival time already implies the duration and "in 9 min" is the number
+you act on.
 
 `transit.py` only calls the API inside the window, so a weekday morning
 costs ~36 requests rather than 288 a day.

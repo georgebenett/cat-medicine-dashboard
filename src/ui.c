@@ -86,6 +86,7 @@ static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these *
 static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
 static int  transit_h1 = 7, transit_h2 = 10;
+static int  transit_lead = 8;          /* minutes needed to reach the stop */
 static char cfg_lat[64] = "55.6078";   /* sized to the cfg value buffer */
 static char cfg_lon[64] = "12.9982";   /* weather.py reads both */
 
@@ -191,6 +192,7 @@ static void cfg_load(void)
         else if (!strcmp(k, "transit_to"))   snprintf(cfg_tto, sizeof cfg_tto, "%s", v);
         else if (!strcmp(k, "transit_h1"))   { int h = atoi(v); if (h >= 0 && h < 24) transit_h1 = h; }
         else if (!strcmp(k, "transit_h2"))   { int h = atoi(v); if (h >= 0 && h <= 24) transit_h2 = h; }
+        else if (!strcmp(k, "transit_lead"))  { int m = atoi(v); if (m >= 0 && m <= 120) transit_lead = m; }
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
         else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
@@ -208,10 +210,10 @@ static void cfg_save(void)
     fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
                "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
-               "transit_h1=%d\ntransit_h2=%d\n",
+               "transit_h1=%d\ntransit_h2=%d\ntransit_lead=%d\n",
             med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct, photo_secs,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
-            cfg_tkey, cfg_tfrom, cfg_tto, transit_h1, transit_h2);
+            cfg_tkey, cfg_tfrom, cfg_tto, transit_h1, transit_h2, transit_lead);
     fclose(f);
 }
 
@@ -274,7 +276,8 @@ static const char *wx_words(int code)
  * mornings in place of the week strip - at 07:30 the next bus matters
  * more than how the week has gone. */
 
-#define MAX_TRIPS 3
+#define MAX_TRIPS 6      /* fetched */
+#define SHOW_TRIPS 3     /* displayed after filtering */
 static struct { char dep[8], arr[8], line[28]; int mins, changes; } trips[MAX_TRIPS];
 static int  n_trips;
 static long transit_updated;
@@ -305,6 +308,14 @@ static void transit_load(void)
         if (field >= 4) n_trips++;
     }
     fclose(f);
+}
+
+/* Minutes from now until "HH:MM", negative if it has been and gone. */
+static int mins_until(const char *hhmm, const struct tm *t)
+{
+    int h, m;
+    if (sscanf(hhmm, "%d:%d", &h, &m) != 2) return -1;
+    return (h * 60 + m) - (t->tm_hour * 60 + t->tm_min);
 }
 
 /* Weekday mornings only, and only while the data is worth trusting: a
@@ -421,7 +432,7 @@ static lv_obj_t *card_status, *lbl_status, *lbl_status_sub;
 static lv_obj_t *status_dot, *btn_dose, *lbl_btn_dose, *icon_dose, *week_wd[7];
 static lv_obj_t *lbl_week_no, *lbl_home_clock, *pop_event;
 static lv_obj_t *lbl_home_date, *wx_img, *lbl_wx_temp, *lbl_wx_desc;
-static lv_obj_t *card_week, *card_transit, *lbl_trip[MAX_TRIPS];
+static lv_obj_t *card_week, *card_transit, *lbl_trip[SHOW_TRIPS];
 static int overdue_now;
 static daycell_t week_cell[7], cal_cell[42];
 static lv_obj_t *lbl_cal_month;
@@ -1094,7 +1105,7 @@ static void build_transit(lv_obj_t *s)
 
     text(card_transit, 30, 16, "Varnhem " LV_SYMBOL_RIGHT " Scheeleparken",
          &lv_font_montserrat_20, C_TEXT2);
-    for (int i = 0; i < MAX_TRIPS; i++)
+    for (int i = 0; i < SHOW_TRIPS; i++)
         lbl_trip[i] = text(card_transit, 30, 54 + i * 42, "", &lv_font_montserrat_24, C_TEXT);
 }
 
@@ -1323,20 +1334,28 @@ static void refresh_home(const struct tm *t, long today)
     lv_obj_set_style_text_color(lbl_status,
                                 lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
     transit_load();
+    /* Filtered here, not in transit.py: the file is rewritten every five
+     * minutes but read every minute, so a departure that was catchable at
+     * fetch time is not by the time it is drawn. */
+    int shown = 0;
     if (transit_show(t)) {
         char row[256];   /* gcc cannot bound the %s from the fixed arrays */
-        for (int i = 0; i < MAX_TRIPS; i++) {
-            if (i >= n_trips) { lv_label_set_text(lbl_trip[i], ""); continue; }
+        for (int i = 0; i < n_trips && shown < SHOW_TRIPS; i++) {
+            int away = mins_until(trips[i].dep, t);
+            if (away < transit_lead) continue;      /* cannot reach it in time */
             const char *ch = trips[i].changes == 0 ? "direct"
                            : trips[i].changes == 1 ? "1 change" : NULL;
             if (ch)
-                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   %d min " LV_SYMBOL_BULLET " %s",
-                         trips[i].dep, trips[i].arr, trips[i].mins, ch);
+                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   in %d min " LV_SYMBOL_BULLET " %s",
+                         trips[i].dep, trips[i].arr, away, ch);
             else
-                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   %d min " LV_SYMBOL_BULLET " %d changes",
-                         trips[i].dep, trips[i].arr, trips[i].mins, trips[i].changes);
-            lv_label_set_text(lbl_trip[i], row);
+                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   in %d min " LV_SYMBOL_BULLET " %d changes",
+                         trips[i].dep, trips[i].arr, away, trips[i].changes);
+            lv_label_set_text(lbl_trip[shown++], row);
         }
+        for (int i = shown; i < SHOW_TRIPS; i++) lv_label_set_text(lbl_trip[i], "");
+    }
+    if (shown) {
         lv_obj_clear_flag(card_transit, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(card_week, LV_OBJ_FLAG_HIDDEN);
     } else {
