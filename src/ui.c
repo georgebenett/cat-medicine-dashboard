@@ -1339,17 +1339,17 @@ static void refresh_home(const struct tm *t, long today)
      * fetch time is not by the time it is drawn. */
     int shown = 0;
     if (transit_show(t)) {
-        char row[256];   /* gcc cannot bound the %s from the fixed arrays */
+        char row[128];
         for (int i = 0; i < n_trips && shown < SHOW_TRIPS; i++) {
             int away = mins_until(trips[i].dep, t);
             if (away < transit_lead) continue;      /* cannot reach it in time */
             const char *ch = trips[i].changes == 0 ? "direct"
                            : trips[i].changes == 1 ? "1 change" : NULL;
             if (ch)
-                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   in %d min " LV_SYMBOL_BULLET " %s",
+                snprintf(row, sizeof row, "%.5s " LV_SYMBOL_RIGHT " %.5s   in %d min " LV_SYMBOL_BULLET " %.10s",
                          trips[i].dep, trips[i].arr, away, ch);
             else
-                snprintf(row, sizeof row, "%s " LV_SYMBOL_RIGHT " %s   in %d min " LV_SYMBOL_BULLET " %d changes",
+                snprintf(row, sizeof row, "%.5s " LV_SYMBOL_RIGHT " %.5s   in %d min " LV_SYMBOL_BULLET " %d changes",
                          trips[i].dep, trips[i].arr, away, trips[i].changes);
             lv_label_set_text(lbl_trip[shown++], row);
         }

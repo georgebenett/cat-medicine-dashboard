@@ -60,7 +60,7 @@ if now.weekday() >= 5 or not (h1 <= now.hour < h2):
     sys.exit(0)
 
 try:
-    d = api('trip', originId=ORIGIN, destId=DEST, numF=8)
+    d = api('trip', originId=ORIGIN, destId=DEST, numF=6)   # 6 is the API maximum; 7+ returns HTTP 400
 except Exception as e:
     print("transit fetch failed: %s" % e, file=sys.stderr)
     sys.exit(0)          # keep the old file; the UI ages it out on its own
