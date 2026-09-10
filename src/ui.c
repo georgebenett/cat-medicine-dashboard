@@ -1324,7 +1324,7 @@ static void refresh_home(const struct tm *t, long today)
                                 lv_color_hex(overdue ? C_BAD_TEXT : C_TEXT), 0);
     transit_load();
     if (transit_show(t)) {
-        char row[128];
+        char row[256];   /* gcc cannot bound the %s from the fixed arrays */
         for (int i = 0; i < MAX_TRIPS; i++) {
             if (i >= n_trips) { lv_label_set_text(lbl_trip[i], ""); continue; }
             const char *ch = trips[i].changes == 0 ? "direct"
