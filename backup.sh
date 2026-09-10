@@ -20,7 +20,12 @@ fi
 # nothing has been logged yet, or it was reset.
 copied=0
 [ -f cat_log.csv ] && { cp -f cat_log.csv "$REPO/cat_log.csv"; copied=1; }
-[ -f cat_cfg.txt ] && { cp -f cat_cfg.txt "$REPO/cat_cfg.txt"; copied=1; }
+# Redact the API key: the config is worth backing up, the credential is
+# not, and this repo is a remote we do not want secrets ending up in.
+[ -f cat_cfg.txt ] && {
+    sed 's/^transit_key=.*/transit_key=<redacted>/' cat_cfg.txt > "$REPO/cat_cfg.txt"
+    copied=1
+}
 # Archives from a Reset, so a mis-tap is recoverable from the backup too.
 for a in archive_*.csv; do
     [ -e "$a" ] && { cp -f "$a" "$REPO/"; copied=1; }
