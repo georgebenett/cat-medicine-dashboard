@@ -1343,14 +1343,15 @@ static void refresh_home(const struct tm *t, long today)
         for (int i = 0; i < n_trips && shown < SHOW_TRIPS; i++) {
             int away = mins_until(trips[i].dep, t);
             if (away < transit_lead) continue;      /* cannot reach it in time */
-            const char *ch = trips[i].changes == 0 ? "direct"
-                           : trips[i].changes == 1 ? "1 change" : NULL;
-            if (ch)
-                snprintf(row, sizeof row, "%.5s " LV_SYMBOL_RIGHT " %.5s   in %d min " LV_SYMBOL_BULLET " %.10s",
-                         trips[i].dep, trips[i].arr, away, ch);
-            else
-                snprintf(row, sizeof row, "%.5s " LV_SYMBOL_RIGHT " %.5s   in %d min " LV_SYMBOL_BULLET " %d changes",
-                         trips[i].dep, trips[i].arr, away, trips[i].changes);
+            /* Direct is the normal case here and saying so every line was
+             * noise; only a change is worth calling out. */
+            char via[40] = "";
+            if (trips[i].changes == 1)
+                snprintf(via, sizeof via, " " LV_SYMBOL_BULLET " 1 change");
+            else if (trips[i].changes > 1)
+                snprintf(via, sizeof via, " " LV_SYMBOL_BULLET " %d changes", trips[i].changes);
+            snprintf(row, sizeof row, "%.5s " LV_SYMBOL_RIGHT " %.5s   in %d min%.39s",
+                     trips[i].dep, trips[i].arr, away, via);
             lv_label_set_text(lbl_trip[shown++], row);
         }
         for (int i = shown; i < SHOW_TRIPS; i++) lv_label_set_text(lbl_trip[i], "");
