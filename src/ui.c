@@ -1395,10 +1395,14 @@ static void refresh_home(const struct tm *t, long today)
         lv_obj_set_style_img_opa(wx_img, stale ? LV_OPA_40 : LV_OPA_COVER, 0);
         lv_label_set_text_fmt(lbl_wx_temp, "%d\xC2\xB0", wx_temp);
         char head[24];
-        if (wx_rain_from >= 0)
-            snprintf(head, sizeof head, "Rain %02d:00", wx_rain_from);
-        else
+        if (wx_rain_from < 0)
             snprintf(head, sizeof head, "%.14s", wx_words(wx_code));
+        else if (wx_rain_from <= t->tm_hour)
+            /* The hour we are already in reads as past tense if you print
+             * it: at 11:19, "Rain 11:00" looks like it has been and gone. */
+            snprintf(head, sizeof head, "Rain now");
+        else
+            snprintf(head, sizeof head, "Rain %02d:00", wx_rain_from);
         lv_label_set_text_fmt(lbl_wx_desc, "%s  %d\xC2\xB0/%d\xC2\xB0",
                               head, wx_hi, wx_lo);
         lv_obj_set_style_text_color(lbl_wx_temp,
