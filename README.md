@@ -6,9 +6,19 @@ LVGL 8.3, hand-written C, no UI builder.
 
 ## Screens
 
+**Gestures do not fire on this touch driver.** LVGL evaluates them in the
+pressing path (`indev_gesture()` in `lv_indev.c`), and instrumenting the
+handlers showed the gesture callbacks never run while the click callbacks
+always do - with a real finger and with synthetic evdev input alike.
+Clearing `LV_OBJ_FLAG_SCROLLABLE` off the layers, which would otherwise
+suppress gestures, made no difference. So the rail is driven by taps; the
+swipe handlers are left in place and would work if the cause is ever
+found.
+
 Navigation is a left icon rail - home, calendar, gear - hidden by default.
-Swipe right from the left edge to bring it in; it hides again after 30
-seconds, or as soon as you pick a screen.
+Tap the grip on the left edge to bring it in; tap the rail anywhere that
+is not an icon to put it away. It also hides after 30 seconds, or as soon
+as you pick a screen.
 
 The rail overlays rather than reflows, so the body keeps the full width
 and only loses its left edge for the few seconds the rail is up. The

@@ -596,11 +596,21 @@ static void edge_gesture_cb(lv_event_t *e)
     if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) rail_show();
 }
 
-/* Swipe left anywhere on the rail to put it away. */
+/* Swipe left anywhere on the rail to put it away. Kept because it is
+ * correct, but LVGL's gesture detection does not fire on this touch
+ * driver - see "Gestures" in README.md - so the tap below is what
+ * actually closes it. */
 static void rail_gesture_cb(lv_event_t *e)
 {
     (void)e;
     if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_LEFT) rail_hide();
+}
+
+/* Tap the rail anywhere that is not an icon: the reliable way to dismiss. */
+static void rail_click_cb(lv_event_t *e)
+{
+    (void)e;
+    rail_hide();
 }
 
 /* A swipe from a 40px strip is a fiddly thing to land on a wall panel, so
@@ -911,6 +921,7 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_add_flag(rail, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(rail, LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(rail, rail_gesture_cb, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(rail, rail_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_style_border_side(rail, LV_BORDER_SIDE_RIGHT, 0);
     lv_obj_set_style_border_color(rail, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(rail, 1, 0);
@@ -1648,6 +1659,12 @@ void ui_init(void)
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* A latched scroll suppresses gestures entirely (lv_indev.c runs
+     * _lv_indev_scroll_handler before indev_gesture, which bails if
+     * scroll_obj is set). Nothing here scrolls, so take it off the layers. */
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(lv_layer_top(), LV_OBJ_FLAG_SCROLLABLE);
 
     build_rail(scr);
 
