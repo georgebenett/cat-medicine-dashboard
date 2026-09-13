@@ -81,7 +81,6 @@ static int  dimmed;                                      /* inside that window n
 static int  dim_pct = 15;                                /* idle level, not off */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
-static int  photo_secs = 60;                             /* portrait shuffle interval */
 static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these */
 static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
@@ -194,7 +193,6 @@ static void cfg_load(void)
         else if (!strcmp(k, "quiet_to"))   { int h = atoi(v); if (h >= 0 && h < 24) quiet_to = h; }
         else if (!strcmp(k, "dim_pct"))    { int p = atoi(v); if (p >= 5 && p <= 60) dim_pct = p; }
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
-        else if (!strcmp(k, "photo_secs")) { int s = atoi(v); if (s >= 5 && s <= 3600) photo_secs = s; }
         else if (!strcmp(k, "lat"))        snprintf(cfg_lat, sizeof cfg_lat, "%s", v);
         else if (!strcmp(k, "lon"))        snprintf(cfg_lon, sizeof cfg_lon, "%s", v);
         else if (!strcmp(k, "transit_key"))  snprintf(cfg_tkey, sizeof cfg_tkey, "%s", v);
@@ -218,12 +216,12 @@ static void cfg_save(void)
     /* lat/lon are written back even though nothing in the UI edits them:
      * cfg_save rewrites the whole file, so a key it does not know about
      * would be silently dropped the first time a setting changed. */
-    fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
+    fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
                "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
                "transit_start=%02d:%02d\ntransit_end=%02d:%02d\ntransit_lead=%d\n"
                "rain_pct=%d\n",
-            med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct, photo_secs,
+            med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
             cfg_tkey, cfg_tfrom, cfg_tto,
             transit_start / 60, transit_start % 60,
@@ -877,14 +875,13 @@ static void build_rail(lv_obj_t *parent)
 
 /* Photos are files, not compiled-in C arrays: drop PNGs in photos/ (or a
  * single cat.png) and restart, no rebuild. They shuffle like a digital
- * portrait - see photo_secs in cat_cfg.txt. */
+ * portrait, one a day at midnight. */
 #define MAX_PHOTOS 64
 #define PHOTO_PAD  5       /* per side, so the photo sits just inside the card */
 #define PHOTO_RADIUS 15      /* card radius 20 less the 5px inset, so it stays concentric */
 
 static char      photo_src[MAX_PHOTOS][288];
 static int       n_photos, photo_i;
-static time_t    last_photo;      /* reset on a manual advance */
 static lv_obj_t *photo_img, *photo_wrap;
 
 static void photos_scan(void)
@@ -913,8 +910,10 @@ static void photos_scan(void)
     printf("photos: %d usable\n", n_photos);
 }
 
-/* Fisher-Yates. Reshuffled only after the last one has been shown, so the
- * whole set goes past before anything repeats. */
+/* Fisher-Yates, once, with a fixed seed: this is the running order the
+ * daily rotation walks through, not something reshuffled as it goes.
+ * Shuffled rather than alphabetical so a month does not land entirely
+ * inside one import batch. */
 static void photos_shuffle(void)
 {
     for (int i = n_photos - 1; i > 0; i--) {
@@ -965,15 +964,22 @@ static void photo_show(int i)
     lv_obj_center(photo_img);
 }
 
+/* One photo a day, picked by the date rather than at random, so a restart
+ * shows the same picture the rest of the day does. */
+static void photo_for_today(void)
+{
+    if (n_photos < 1) return;
+    photo_i = (int)(today_num() % n_photos);
+    photo_show(photo_i);
+}
+
+/* A tap overrides the day's pick until midnight. */
 static void photo_tap_cb(lv_event_t *e)
 {
     (void)e;
     if (n_photos < 2) return;
-    if (++photo_i >= n_photos) { photo_i = 0; photos_shuffle(); }
+    if (++photo_i >= n_photos) photo_i = 0;
     photo_show(photo_i);
-    /* Restart the dwell, or a tap a second before the minute is up would
-     * show the new photo for an instant and then move on. */
-    last_photo = time(NULL);
 }
 
 static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
@@ -992,7 +998,7 @@ static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
         photo_img = lv_img_create(photo_wrap);
         lv_obj_clear_flag(photo_img, LV_OBJ_FLAG_CLICKABLE);
         lv_img_set_antialias(photo_img, true);
-        photo_show(0);
+        photo_for_today();
     } else {
         printf("photos: none found - showing placeholder\n");
         lv_obj_set_style_bg_color(c, lv_color_hex(C_WARN_BG), 0);
@@ -1550,7 +1556,10 @@ void ui_init(void)
 {
     cfg_load();
     store_load();
-    srand((unsigned)time(NULL));
+    /* Fixed seed on purpose. The shuffle decides which photo belongs to
+     * which day, so a random seed would hand you a different picture every
+     * time the Pi restarts - and it restarts on its own. */
+    srand(20260913);
 
     struct tm t = now_tm();
     cal_y = t.tm_year + 1900;
@@ -1647,14 +1656,9 @@ void ui_tick(void)
         if (cur_screen == 2) refresh_settings(&t);
     }
 
-    if (n_photos > 1 && now - last_photo >= photo_secs) {
-        last_photo = now;
-        if (++photo_i >= n_photos) { photo_i = 0; photos_shuffle(); }
-        photo_show(photo_i);
-    }
-
-    if (t.tm_yday != last_yday) {            /* midnight: today's status changed */
+    if (t.tm_yday != last_yday) {            /* midnight: new day, new photo */
         last_yday = t.tm_yday;
+        photo_for_today();
         refresh();
     }
 }

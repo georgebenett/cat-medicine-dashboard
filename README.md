@@ -70,10 +70,16 @@ Paths are overridable: `CAT_LOG`, `CAT_CFG`, `CAT_IMG`.
 
 ## Her photos
 
-Drop PNGs in `photos/` next to the binary and restart. They shuffle like
-a digital portrait, one a minute (`photo_secs` in `cat_cfg.txt`), in a
-random order that shows the whole set before repeating. A single
-`cat.png` still works as a fallback if `photos/` is empty.
+Drop PNGs in `photos/` next to the binary and restart. One photo a day,
+changing at midnight. Tapping the photo advances it early; the tap holds
+until the next midnight. A single `cat.png` still works as a fallback if
+`photos/` is empty.
+
+Which photo belongs to which day comes from the date, not from a random
+draw, so a reboot shows the same picture as the rest of the day - this Pi
+restarts on its own often enough for that to matter. The running order is
+shuffled once with a fixed seed rather than left alphabetical, so a month
+does not land entirely inside one import batch.
 
 Loaded at runtime through LVGL's POSIX filesystem driver, *not* compiled
 in as C arrays, so changing the pictures needs no rebuild. Each decodes
