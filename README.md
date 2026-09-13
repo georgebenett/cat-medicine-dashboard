@@ -100,6 +100,12 @@ restarts on its own often enough for that to matter. The running order is
 shuffled once with a fixed seed rather than left alphabetical, so a month
 does not land entirely inside one import batch.
 
+**Export to exactly cover the window**, with no safety margin. LVGL only
+takes its fast blit path when the zoom works out to exactly 256; a 3%
+margin put 34 of 47 photos on 249, which runs the per-pixel transform and
+tripled the cost of a full redraw of the home screen (43ms -> 101ms).
+`photo_show()` prints a warning if any photo would upscale.
+
 Loaded at runtime through LVGL's POSIX filesystem driver, *not* compiled
 in as C arrays, so changing the pictures needs no rebuild. Each decodes
 to 4 bytes per pixel and has to fit in `LV_MEM_SIZE` (8MB), so anything
