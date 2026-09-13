@@ -54,9 +54,19 @@ if not (ORIGIN and DEST):
     sys.exit(0)
 
 # Outside the window there is nothing to show, so do not spend a call on it.
+def hhmm(s, dflt):
+    try:
+        h, m = s.split(':')
+        return int(h) * 60 + int(m)
+    except (AttributeError, ValueError):
+        return dflt
+
 now = datetime.now()
-h1, h2 = int(cfg('transit_h1', 7)), int(cfg('transit_h2', 10))
-if now.weekday() >= 5 or not (h1 <= now.hour < h2):
+start = hhmm(cfg('transit_start'), 8 * 60)
+end = hhmm(cfg('transit_end'), 9 * 60 + 30)
+mins = now.hour * 60 + now.minute
+inside = (start <= mins < end) if start < end else (mins >= start or mins < end)
+if now.weekday() >= 5 or not inside:
     sys.exit(0)
 
 try:

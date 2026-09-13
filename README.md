@@ -159,9 +159,13 @@ rather than retrying. Check it with `journalctl -t wifi-watchdog`.
 ## Transit
 
 Weekday mornings the week strip is replaced by the next three departures
-Varnhem -> Scheeleparken. Outside `transit_h1`..`transit_h2` (07-10), at
-weekends, or when the data is over 15 minutes old, the week strip comes
-back - a stale departure board is worse than none.
+Varnhem -> Scheeleparken. Outside `transit_start`..`transit_end`
+(08:00-09:30), at weekends, or when the data is over 15 minutes old, the
+week strip comes back - a stale departure board is worse than none.
+
+Both that window and the night dim go through `sched_in_window()`, which
+handles the wrap past midnight the night window needs and is covered by
+`make test`.
 
 Skanetrafiken shut their own API down in 2021, so this goes through
 Trafiklab's ResRobot v2.1 route planner, which aggregates it. It needs a
@@ -171,6 +175,8 @@ free key from trafiklab.se:
     transit_from=...     stop ids, see below
     transit_to=...
     transit_lead=8       minutes needed to reach the stop
+    transit_start=08:00  window opens
+    transit_end=09:30    window closes
 
 Find the stop ids once the key is in place:
 

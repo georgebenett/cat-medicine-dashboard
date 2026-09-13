@@ -57,6 +57,20 @@ static inline int sched_days_in_month(int y, int m)
     return d[m - 1];
 }
 
+/* Is `m` (minutes since midnight) inside [start, end)? Wraps past midnight
+ * when start > end, which is what a night window needs. start == end means
+ * the window is disabled, never always-on - an empty range is the safer
+ * reading of "no window set".
+ *
+ * Shared by the night dim and the commute board so there is one piece of
+ * wrap-around logic rather than two. */
+static inline int sched_in_window(int m, int start, int end)
+{
+    if (start == end)  return 0;
+    if (start < end)   return m >= start && m < end;
+    return m >= start || m < end;
+}
+
 /* ISO 8601 week number. The week belongs to whichever year its Thursday
  * falls in, which is what makes 29 Dec 2025 week 1 and 1 Jan 2027 week 53. */
 static inline int sched_iso_week(long dn)

@@ -74,6 +74,23 @@ int main(void)
         assert(sched_iso_week(dn) >= 1 && sched_iso_week(dn) <= 53);
     }
 
+    /* Time windows. Start is inclusive, end exclusive, and start > end
+     * wraps past midnight - the night dim depends on that. */
+    assert(sched_in_window(8 * 60,      8 * 60, 9 * 60 + 30) == 1);  /* on the start */
+    assert(sched_in_window(9 * 60 + 29, 8 * 60, 9 * 60 + 30) == 1);  /* last minute */
+    assert(sched_in_window(9 * 60 + 30, 8 * 60, 9 * 60 + 30) == 0);  /* end excluded */
+    assert(sched_in_window(7 * 60 + 59, 8 * 60, 9 * 60 + 30) == 0);
+    assert(sched_in_window(0,           8 * 60, 9 * 60 + 30) == 0);
+
+    assert(sched_in_window(23 * 60, 23 * 60, 5 * 60) == 1);          /* wraps */
+    assert(sched_in_window(2 * 60,  23 * 60, 5 * 60) == 1);
+    assert(sched_in_window(4 * 60 + 59, 23 * 60, 5 * 60) == 1);
+    assert(sched_in_window(5 * 60,  23 * 60, 5 * 60) == 0);
+    assert(sched_in_window(22 * 60 + 59, 23 * 60, 5 * 60) == 0);
+    assert(sched_in_window(12 * 60, 23 * 60, 5 * 60) == 0);
+
+    assert(sched_in_window(12 * 60, 9 * 60, 9 * 60) == 0);           /* disabled */
+
     printf("sched: all checks passed\n");
     return 0;
 }

@@ -85,10 +85,19 @@ static int  photo_secs = 60;                             /* portrait shuffle int
 static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these */
 static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
-static int  transit_h1 = 7, transit_h2 = 10;
+static int  transit_start = 8 * 60, transit_end = 9 * 60 + 30;   /* minutes since midnight */
 static int  transit_lead = 8;          /* minutes needed to reach the stop */
 static char cfg_lat[64] = "55.6078";   /* sized to the cfg value buffer */
 static char cfg_lon[64] = "12.9982";   /* weather.py reads both */
+
+/* "HH:MM" to minutes since midnight, or dflt if it is not that shape. */
+static int parse_hhmm(const char *s, int dflt)
+{
+    int h, m;
+    if (sscanf(s, "%d:%d", &h, &m) != 2) return dflt;
+    if (h < 0 || h > 23 || m < 0 || m > 59) return dflt;
+    return h * 60 + m;
+}
 
 static const char *env_or(const char *var, const char *dflt)
 {
@@ -190,8 +199,8 @@ static void cfg_load(void)
         else if (!strcmp(k, "transit_key"))  snprintf(cfg_tkey, sizeof cfg_tkey, "%s", v);
         else if (!strcmp(k, "transit_from")) snprintf(cfg_tfrom, sizeof cfg_tfrom, "%s", v);
         else if (!strcmp(k, "transit_to"))   snprintf(cfg_tto, sizeof cfg_tto, "%s", v);
-        else if (!strcmp(k, "transit_h1"))   { int h = atoi(v); if (h >= 0 && h < 24) transit_h1 = h; }
-        else if (!strcmp(k, "transit_h2"))   { int h = atoi(v); if (h >= 0 && h <= 24) transit_h2 = h; }
+        else if (!strcmp(k, "transit_start")) transit_start = parse_hhmm(v, transit_start);
+        else if (!strcmp(k, "transit_end"))   transit_end   = parse_hhmm(v, transit_end);
         else if (!strcmp(k, "transit_lead"))  { int m = atoi(v); if (m >= 0 && m <= 120) transit_lead = m; }
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
@@ -210,10 +219,12 @@ static void cfg_save(void)
     fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
                "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
-               "transit_h1=%d\ntransit_h2=%d\ntransit_lead=%d\n",
+               "transit_start=%02d:%02d\ntransit_end=%02d:%02d\ntransit_lead=%d\n",
             med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct, photo_secs,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
-            cfg_tkey, cfg_tfrom, cfg_tto, transit_h1, transit_h2, transit_lead);
+            cfg_tkey, cfg_tfrom, cfg_tto,
+            transit_start / 60, transit_start % 60,
+            transit_end / 60, transit_end % 60, transit_lead);
     fclose(f);
 }
 
@@ -323,7 +334,7 @@ static int mins_until(const char *hhmm, const struct tm *t)
 static int transit_show(const struct tm *t)
 {
     if (n_trips == 0 || t->tm_wday == 0 || t->tm_wday == 6) return 0;
-    if (t->tm_hour < transit_h1 || t->tm_hour >= transit_h2) return 0;
+    if (!sched_in_window(t->tm_hour * 60 + t->tm_min, transit_start, transit_end)) return 0;
     return transit_updated && (long)time(NULL) - transit_updated < 15 * 60;
 }
 
@@ -651,14 +662,6 @@ static void day_pill_cb(lv_event_t *e)
 /* The value labels are written here as well as in refresh_settings, because
  * refresh_settings only runs once a minute now - the sliders have to track
  * the drag themselves. */
-/* The window wraps midnight, so 23->5 is not a simple range test. */
-static int in_quiet_hours(int hour)
-{
-    if (quiet_from == quiet_to) return 0;                 /* disabled */
-    if (quiet_from < quiet_to)  return hour >= quiet_from && hour < quiet_to;
-    return hour >= quiet_from || hour < quiet_to;
-}
-
 static void backlight_label(int pct) { lv_label_set_text_fmt(lbl_bl_val, "%d%%", pct); }
 
 static void dim_label(int pct) { lv_label_set_text_fmt(lbl_dim_val, "%d%%", pct); }
@@ -1582,7 +1585,8 @@ void ui_tick(void)
      * sleep in the middle of the day, which is exactly when an unlogged
      * dose most needs to catch someone's eye. */
     {
-        int night = in_quiet_hours(t.tm_hour);
+        int night = sched_in_window(t.tm_hour * 60 + t.tm_min,
+                                    quiet_from * 60, quiet_to * 60);
         if (night != dimmed) {
             int awake = (int)lv_slider_get_value(ui_backlight_slider);
             /* Never dim *up*: if the slider sits below dim_pct, keep it. */
