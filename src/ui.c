@@ -874,6 +874,7 @@ static void build_rail(lv_obj_t *parent)
 
 static char      photo_src[MAX_PHOTOS][288];
 static int       n_photos, photo_i;
+static time_t    last_photo;      /* reset on a manual advance */
 static lv_obj_t *photo_img, *photo_wrap;
 
 static void photos_scan(void)
@@ -954,17 +955,32 @@ static void photo_show(int i)
     lv_obj_center(photo_img);
 }
 
+static void photo_tap_cb(lv_event_t *e)
+{
+    (void)e;
+    if (n_photos < 2) return;
+    if (++photo_i >= n_photos) { photo_i = 0; photos_shuffle(); }
+    photo_show(photo_i);
+    /* Restart the dwell, or a tap a second before the minute is up would
+     * show the new photo for an instant and then move on. */
+    last_photo = time(NULL);
+}
+
 static void build_photo(lv_obj_t *parent, int x, int y, int w, int h)
 {
     lv_obj_t *c = box(parent, x, y, w, h, C_SURF1, 20);
+    lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(c, photo_tap_cb, LV_EVENT_CLICKED, NULL);
     photos_scan();
 
     if (n_photos > 0) {
         photos_shuffle();
         photo_wrap = box(c, 0, 0, 10, 10, C_SURF1, PHOTO_RADIUS);
+        lv_obj_clear_flag(photo_wrap, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_bg_opa(photo_wrap, LV_OPA_0, 0);
         lv_obj_set_style_clip_corner(photo_wrap, true, 0);
         photo_img = lv_img_create(photo_wrap);
+        lv_obj_clear_flag(photo_img, LV_OBJ_FLAG_CLICKABLE);
         lv_img_set_antialias(photo_img, true);
         photo_show(0);
     } else {
@@ -1573,7 +1589,7 @@ int ui_backlight_pct(void) { return backlight_pct; }
 
 void ui_tick(void)
 {
-    static time_t last_sec, last_photo;
+    static time_t last_sec;
     static int last_yday = -1, last_min = -1;
 
     time_t now = time(NULL);
