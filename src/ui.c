@@ -87,6 +87,7 @@ static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
 static int  transit_start = 8 * 60, transit_end = 9 * 60 + 30;   /* minutes since midnight */
 static int  transit_lead = 8;          /* minutes needed to reach the stop */
+static int  rain_pct = 40;             /* weather.py: chance that means "coat" */
 static char cfg_lat[64] = "55.6078";   /* sized to the cfg value buffer */
 static char cfg_lon[64] = "12.9982";   /* weather.py reads both */
 
@@ -202,6 +203,7 @@ static void cfg_load(void)
         else if (!strcmp(k, "transit_start")) transit_start = parse_hhmm(v, transit_start);
         else if (!strcmp(k, "transit_end"))   transit_end   = parse_hhmm(v, transit_end);
         else if (!strcmp(k, "transit_lead"))  { int m = atoi(v); if (m >= 0 && m <= 120) transit_lead = m; }
+        else if (!strcmp(k, "rain_pct"))      { int p = atoi(v); if (p > 0 && p <= 100) rain_pct = p; }
         else if (!strcmp(k, "reminder"))   reminder_on = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "reminder_h")) { int h = atoi(v); if (h >= 0 && h < 24) reminder_h = h; }
         else if (!strcmp(k, "reminder_m")) { int m = atoi(v); if (m >= 0 && m < 60) reminder_m = m; }
@@ -219,12 +221,13 @@ static void cfg_save(void)
     fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\nphoto_secs=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
                "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
-               "transit_start=%02d:%02d\ntransit_end=%02d:%02d\ntransit_lead=%d\n",
+               "transit_start=%02d:%02d\ntransit_end=%02d:%02d\ntransit_lead=%d\n"
+               "rain_pct=%d\n",
             med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct, photo_secs,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
             cfg_tkey, cfg_tfrom, cfg_tto,
             transit_start / 60, transit_start % 60,
-            transit_end / 60, transit_end % 60, transit_lead);
+            transit_end / 60, transit_end % 60, transit_lead, rain_pct);
     fclose(f);
 }
 
@@ -234,10 +237,13 @@ static void cfg_save(void)
  * than a blank panel. */
 
 static int  wx_temp, wx_code = -1, wx_hi, wx_lo;
+static int  wx_rain_from = -1, wx_rain_max;
 static long wx_updated;
 
 static void weather_load(void)
 {
+    wx_rain_from = -1;
+    wx_rain_max = 0;
     FILE *f = fopen(env_or("CAT_WEATHER", "weather.txt"), "r");
     if (!f) return;
     char line[64], k[24], v[32];
@@ -247,6 +253,8 @@ static void weather_load(void)
         else if (!strcmp(k, "code"))    wx_code = atoi(v);
         else if (!strcmp(k, "hi"))      wx_hi = atoi(v);
         else if (!strcmp(k, "lo"))      wx_lo = atoi(v);
+        else if (!strcmp(k, "rain_from")) wx_rain_from = atoi(v);
+        else if (!strcmp(k, "rain_max"))  wx_rain_max = atoi(v);
         else if (!strcmp(k, "updated")) wx_updated = atol(v);
     }
     fclose(f);
@@ -1386,8 +1394,13 @@ static void refresh_home(const struct tm *t, long today)
         lv_img_set_src(wx_img, wx_icon_file(wx_code));
         lv_obj_set_style_img_opa(wx_img, stale ? LV_OPA_40 : LV_OPA_COVER, 0);
         lv_label_set_text_fmt(lbl_wx_temp, "%d\xC2\xB0", wx_temp);
+        char head[24];
+        if (wx_rain_from >= 0)
+            snprintf(head, sizeof head, "Rain %02d:00", wx_rain_from);
+        else
+            snprintf(head, sizeof head, "%.14s", wx_words(wx_code));
         lv_label_set_text_fmt(lbl_wx_desc, "%s  %d\xC2\xB0/%d\xC2\xB0",
-                              wx_words(wx_code), wx_hi, wx_lo);
+                              head, wx_hi, wx_lo);
         lv_obj_set_style_text_color(lbl_wx_temp,
                                     lv_color_hex(stale ? C_MUTED : C_TEXT), 0);
         lv_obj_set_style_text_color(lbl_wx_desc,

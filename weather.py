@@ -9,6 +9,7 @@ reads it - the same shape as cat_cfg.txt.
 Open-Meteo needs no API key. Location comes from lat/lon in cat_cfg.txt.
 """
 import json, os, sys, time, urllib.request
+from datetime import datetime
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,6 +28,7 @@ lat, lon = cfg('lat', '55.6078'), cfg('lon', '12.9982')
 url = ("https://api.open-meteo.com/v1/forecast"
        f"?latitude={lat}&longitude={lon}"
        "&current=temperature_2m,weather_code"
+       "&hourly=precipitation_probability"
        "&daily=temperature_2m_max,temperature_2m_min"
        "&timezone=auto&forecast_days=1")
 
@@ -34,10 +36,30 @@ try:
     with urllib.request.urlopen(url, timeout=20) as r:
         d = json.load(r)
     cur, day = d['current'], d['daily']
-    out = ("temp=%.0f\ncode=%d\nhi=%.0f\nlo=%.0f\nupdated=%d\n" % (
+
+    # First hour from now with a real chance of rain. Only the rest of
+    # today matters - a shower at 06:00 is no reason to take a coat at 09:00.
+    thresh = int(cfg('rain_pct', 40))
+    hourly = d.get('hourly', {})
+    times = hourly.get('time', [])
+    probs = hourly.get('precipitation_probability', [])
+    today = datetime.now().strftime('%Y-%m-%d')
+    now_h = datetime.now().hour
+    rain_from, rain_max = -1, 0
+    for ts, p in zip(times, probs):
+        if not ts.startswith(today) or p is None:
+            continue
+        h = int(ts[11:13])
+        if h < now_h:
+            continue
+        rain_max = max(rain_max, p)
+        if p >= thresh and rain_from < 0:
+            rain_from = h
+
+    out = ("temp=%.0f\ncode=%d\nhi=%.0f\nlo=%.0f\nrain_from=%d\nrain_max=%d\nupdated=%d\n" % (
         cur['temperature_2m'], cur['weather_code'],
         day['temperature_2m_max'][0], day['temperature_2m_min'][0],
-        int(time.time())))
+        rain_from, rain_max, int(time.time())))
 except Exception as e:
     # Keep the stale file: yesterday's weather beats a blank panel, and the
     # UI greys it out once it is old. The timer retries.

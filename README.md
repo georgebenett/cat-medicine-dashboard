@@ -139,6 +139,14 @@ and making a blocking HTTP call inside the LVGL loop, stalling the panel
 for as long as the network takes. Same shape as the backup - a timer
 writes a file, the UI reads it.
 
+The card shows when rain is next expected rather than the current
+condition - the icon already says what it is doing now, so the words are
+better spent on what it is going to do. `weather.py` scans the hourly
+probabilities for the rest of today and reports the first hour at or over
+`rain_pct` (40%); earlier hours are skipped, since a shower at 06:00 is
+no reason to take a coat at 09:00. With no rain due, the condition word
+is shown as before.
+
 Location is `lat`/`lon` in `cat_cfg.txt`, defaulting to Malmo. A failed
 fetch keeps the last file rather than blanking the panel; anything older
 than three hours is greyed out so stale numbers are not shown as current.
