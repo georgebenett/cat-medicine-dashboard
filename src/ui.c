@@ -596,6 +596,14 @@ static void edge_gesture_cb(lv_event_t *e)
     if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) rail_show();
 }
 
+/* A swipe from a 40px strip is a fiddly thing to land on a wall panel, so
+ * a plain tap on the grip opens it too. Both are harmless to fire twice. */
+static void edge_click_cb(lv_event_t *e)
+{
+    (void)e;
+    rail_show();
+}
+
 static void show_screen(int i)
 {
     cur_screen = i;
@@ -882,6 +890,13 @@ static void build_rail(lv_obj_t *parent)
      * whole press with the strip. */
     lv_obj_add_flag(edge, LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(edge, edge_gesture_cb, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(edge, edge_click_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Something to aim at: a drawer grip, so the rail is not invisible
+     * affordance-wise. Not clickable itself - the strip behind it takes
+     * the press, and a child would steal it. */
+    lv_obj_t *grip = box(edge, 9, SCR_H / 2 - 30, 5, 60, C_MUTED, LV_RADIUS_CIRCLE);
+    lv_obj_clear_flag(grip, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *rail = box(lv_layer_top(), 0, 0, RAIL_W, SCR_H, C_SURF1, 0);
     rail_panel = rail;
