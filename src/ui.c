@@ -598,27 +598,6 @@ static void rail_hide(void)
     rail_shown_at = 0;
 }
 
-/* Swipe right from the left edge, the usual way a drawer is summoned.
- * A dedicated strip rather than a screen-wide handler: LVGL sends the
- * gesture to the pressed object and only walks up parents flagged
- * GESTURE_BUBBLE, and a screen-wide swipe would also fire the photo's
- * click handler on the way past. */
-static void edge_gesture_cb(lv_event_t *e)
-{
-    (void)e;
-    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) rail_show();
-}
-
-/* Swipe left anywhere on the rail to put it away. Kept because it is
- * correct, but LVGL's gesture detection does not fire on this touch
- * driver - see "Gestures" in README.md - so the tap below is what
- * actually closes it. */
-static void rail_gesture_cb(lv_event_t *e)
-{
-    (void)e;
-    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_LEFT) rail_hide();
-}
-
 /* Tap the rail anywhere that is not an icon: the reliable way to dismiss. */
 static void rail_click_cb(lv_event_t *e)
 {
@@ -908,18 +887,14 @@ static void build_rail(lv_obj_t *parent)
     static const char *icons[3] = { LV_SYMBOL_HOME, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS };
     (void)parent;
 
-    /* Invisible strip down the left edge that catches the reveal swipe. */
+    /* Tap strip down the left edge that summons the rail. */
     lv_obj_t *edge = box(lv_layer_top(), 0, 0, EDGE_W, SCR_H, C_BG, 0);
     lv_obj_set_style_bg_opa(edge, LV_OPA_0, 0);
     lv_obj_add_flag(edge, LV_OBJ_FLAG_CLICKABLE);
-    /* Without this LVGL re-searches the object under the finger every poll
-     * (lv_indev.c: "If there is last object but it is not scrolled and not
-     * protected also search"), so a swipe that leaves this 40px strip hands
-     * the gesture - and the release click - to whatever is underneath. The
-     * photo advanced instead of the rail appearing. PRESS_LOCK keeps the
-     * whole press with the strip. */
+    /* LVGL re-searches the object under the finger every poll unless this
+     * is set, so a press that drifts off the strip would click whatever is
+     * underneath - the photo, in practice. */
     lv_obj_add_flag(edge, LV_OBJ_FLAG_PRESS_LOCK);
-    lv_obj_add_event_cb(edge, edge_gesture_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(edge, edge_click_cb, LV_EVENT_CLICKED, NULL);
 
     /* Something to aim at: a drawer grip, so the rail is not invisible
@@ -933,7 +908,6 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_add_flag(rail, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(rail, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(rail, LV_OBJ_FLAG_PRESS_LOCK);
-    lv_obj_add_event_cb(rail, rail_gesture_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(rail, rail_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_style_border_side(rail, LV_BORDER_SIDE_RIGHT, 0);
     lv_obj_set_style_border_color(rail, lv_color_hex(C_BORDER), 0);
@@ -942,11 +916,6 @@ static void build_rail(lv_obj_t *parent)
     for (int i = 0; i < 3; i++) {
         lv_obj_t *it = box(rail, 14, 20 + i * 80, 64, 64, C_ACC_BG, 16);
         lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
-        /* A swipe that starts on an icon should still close the rail: the
-         * gesture goes to the pressed object and only walks up through
-         * parents carrying GESTURE_BUBBLE, and the rail itself must not
-         * carry it or the walk would continue past it to nothing. */
-        lv_obj_add_flag(it, LV_OBJ_FLAG_GESTURE_BUBBLE);
         lv_obj_add_flag(it, LV_OBJ_FLAG_PRESS_LOCK);
         lv_obj_add_event_cb(it, rail_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         lv_obj_t *l = lv_label_create(it);
@@ -1671,11 +1640,7 @@ void ui_init(void)
 
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
-    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* A latched scroll suppresses gestures entirely (lv_indev.c runs
-     * _lv_indev_scroll_handler before indev_gesture, which bails if
-     * scroll_obj is set). Nothing here scrolls, so take it off the layers. */
+    /* Nothing here scrolls, and a latched scroll swallows presses. */
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(lv_layer_top(), LV_OBJ_FLAG_SCROLLABLE);
 

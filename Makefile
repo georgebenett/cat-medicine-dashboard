@@ -8,7 +8,16 @@ CFLAGS   := -O2 -Wall -Wno-unused-function -I$(LVGL_DIR) -I$(LVGL_DIR)/src
 CXXFLAGS := $(CFLAGS) -std=c++11
 LDFLAGS  := -lm -lpthread
 
-include $(LVGL_DIR)/lvgl/lvgl.mk
+# The seven src makefiles, not lvgl.mk: its first two lines pull in
+# demos/ and examples/ - the music player, the benchmark, every widget
+# example - which was 234 of 424 object files linked into a cat dashboard.
+include $(LVGL_DIR)/lvgl/src/core/lv_core.mk
+include $(LVGL_DIR)/lvgl/src/draw/lv_draw.mk
+include $(LVGL_DIR)/lvgl/src/extra/lv_extra.mk
+include $(LVGL_DIR)/lvgl/src/font/lv_font.mk
+include $(LVGL_DIR)/lvgl/src/hal/lv_hal.mk
+include $(LVGL_DIR)/lvgl/src/misc/lv_misc.mk
+include $(LVGL_DIR)/lvgl/src/widgets/lv_widgets.mk
 
 CSRCS   += main.c $(wildcard src/*.c)
 CXXSRCS := $(wildcard src/*.cpp)
