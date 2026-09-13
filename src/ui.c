@@ -48,12 +48,16 @@
 #define SCR_H    720
 #define RAIL_W   92
 #define PAD      40
-#define BODY_X   (RAIL_W + PAD)
-#define BODY_W   (SCR_W - RAIL_W - 2 * PAD)
+/* The rail is an overlay now, so the body keeps the full width and only
+ * loses the left 92px while the rail is actually on screen. */
+#define BODY_X   PAD
+#define BODY_W   (SCR_W - 2 * PAD)
 #define BODY_H   (SCR_H - 2 * PAD)
 #define PHOTO_W  480     /* 480x640 = 3:4, matching portrait photos */
 #define PHOTO_H  BODY_H   /* fills the body, bottom-aligned with the week card */
 #define GAP      24
+#define EDGE_W   40      /* swipe-from-here strip */
+#define RAIL_SECS 30     /* auto-hide */
 #define RIGHT_X  (PHOTO_W + GAP)
 #define RIGHT_W  (BODY_W - RIGHT_X)
 #define BTN_W    ((RIGHT_W - 22) / 2)
@@ -452,7 +456,8 @@ static lv_obj_t *lbl_home_date, *wx_img, *lbl_wx_temp, *lbl_wx_desc;
 static lv_obj_t *card_week, *card_transit, *lbl_trip[SHOW_TRIPS];
 static int overdue_now;
 static daycell_t week_cell[7], cal_cell[42];
-static lv_obj_t *lbl_cal_month;
+static lv_obj_t *lbl_cal_month, *rail_panel;
+static time_t    rail_shown_at;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
@@ -566,6 +571,31 @@ static void toast(const char *msg)
     toast_until = time(NULL) + 3;
 }
 
+static void rail_show(void)
+{
+    if (!rail_panel) return;
+    lv_obj_clear_flag(rail_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(rail_panel);
+    rail_shown_at = time(NULL);
+}
+
+static void rail_hide(void)
+{
+    if (rail_panel) lv_obj_add_flag(rail_panel, LV_OBJ_FLAG_HIDDEN);
+    rail_shown_at = 0;
+}
+
+/* Swipe right from the left edge, the usual way a drawer is summoned.
+ * A dedicated strip rather than a screen-wide handler: LVGL sends the
+ * gesture to the pressed object and only walks up parents flagged
+ * GESTURE_BUBBLE, and a screen-wide swipe would also fire the photo's
+ * click handler on the way past. */
+static void edge_gesture_cb(lv_event_t *e)
+{
+    (void)e;
+    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) rail_show();
+}
+
 static void show_screen(int i)
 {
     cur_screen = i;
@@ -577,6 +607,8 @@ static void show_screen(int i)
         lv_obj_set_style_text_color(lv_obj_get_child(rail_items[k], 0),
                                     lv_color_hex(k == i ? C_ACC_TEXT : C_TEXT2), 0);
     }
+    /* Picking a screen is the end of what the rail is for. */
+    if (rail_shown_at) rail_hide();
     refresh();
 }
 
@@ -836,7 +868,17 @@ static void refresh_status_icons(void)
 static void build_rail(lv_obj_t *parent)
 {
     static const char *icons[3] = { LV_SYMBOL_HOME, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS };
-    lv_obj_t *rail = box(parent, 0, 0, RAIL_W, SCR_H, C_SURF1, 0);
+    (void)parent;
+
+    /* Invisible strip down the left edge that catches the reveal swipe. */
+    lv_obj_t *edge = box(lv_layer_top(), 0, 0, EDGE_W, SCR_H, C_BG, 0);
+    lv_obj_set_style_bg_opa(edge, LV_OPA_0, 0);
+    lv_obj_add_flag(edge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(edge, edge_gesture_cb, LV_EVENT_GESTURE, NULL);
+
+    lv_obj_t *rail = box(lv_layer_top(), 0, 0, RAIL_W, SCR_H, C_SURF1, 0);
+    rail_panel = rail;
+    lv_obj_add_flag(rail, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_border_side(rail, LV_BORDER_SIDE_RIGHT, 0);
     lv_obj_set_style_border_color(rail, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(rail, 1, 0);
@@ -1655,6 +1697,8 @@ void ui_tick(void)
         if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
         if (cur_screen == 2) refresh_settings(&t);
     }
+
+    if (rail_shown_at && now - rail_shown_at >= RAIL_SECS) rail_hide();
 
     if (t.tm_yday != last_yday) {            /* midnight: new day, new photo */
         last_yday = t.tm_yday;

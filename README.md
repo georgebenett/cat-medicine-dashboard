@@ -6,7 +6,16 @@ LVGL 8.3, hand-written C, no UI builder.
 
 ## Screens
 
-Navigation is a left icon rail - home, calendar, gear - not a tab bar.
+Navigation is a left icon rail - home, calendar, gear - hidden by default.
+Swipe right from the left edge to bring it in; it hides again after 30
+seconds, or as soon as you pick a screen.
+
+The rail overlays rather than reflows, so the body keeps the full width
+and only loses its left edge for the few seconds the rail is up. The
+reveal gesture lives on a 40px strip in the left margin rather than on the
+screen: LVGL sends a gesture to the pressed object and only walks up
+parents flagged `GESTURE_BUBBLE`, and a screen-wide swipe would also fire
+the photo's click handler on the way past.
 
 - **Today** - her photos and name, whether today is a medicine day, the
   dose count for the week, a Mon..Sun strip, and buttons to log a dose or
