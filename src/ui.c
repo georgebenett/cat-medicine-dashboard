@@ -546,6 +546,16 @@ static void daycell_set(daycell_t *c, int dom, int today, uint32_t fg,
     while (n < 2) lv_obj_add_flag(c->dot[n++], LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Every button here is flat. lv_btn's default style draws a shadow under
+ * it, which reads as a dark lip along the bottom edge and does not match
+ * the cards. Going through this stops the next button reintroducing it. */
+static lv_obj_t *flat_btn(lv_obj_t *parent)
+{
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    return b;
+}
+
 static void refresh(void);
 
 /* --- events --------------------------------------------------------- */
@@ -1003,7 +1013,7 @@ static void build_home(lv_obj_t *s)
     lbl_status_sub = text(card_status, 62, 88, "", &lv_font_montserrat_24, C_TEXT2);
 
     int bw = BTN_W;
-    btn_dose = lv_btn_create(s);
+    btn_dose = flat_btn(s);
     lv_obj_set_pos(btn_dose, RIGHT_X, 182);
     lv_obj_set_size(btn_dose, bw, 120);
     lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
@@ -1041,7 +1051,7 @@ static void build_home(lv_obj_t *s)
     lv_obj_set_style_text_color(lbl_btn_dose, lv_color_hex(C_ACC_ON), 0);
     lv_label_set_text(lbl_btn_dose, "Log dose given");
 
-    lv_obj_t *b2 = lv_btn_create(s);
+    lv_obj_t *b2 = flat_btn(s);
     lv_obj_set_pos(b2, RIGHT_X + bw + 22, 182);
     lv_obj_set_size(b2, bw, 120);
     lv_obj_set_style_bg_color(b2, lv_color_hex(C_BORDER_ST), 0);
@@ -1089,11 +1099,10 @@ static void build_home(lv_obj_t *s)
 static void pop_row(int idx, int rows, const char *icon, const char *label,
                     uint32_t color, char kind)
 {
-    lv_obj_t *b = lv_btn_create(pop_event);
+    lv_obj_t *b = flat_btn(pop_event);
     lv_obj_set_size(b, POP_W - 16, POP_RH);
     lv_obj_set_pos(b, 0, idx * POP_RH);
     lv_obj_set_style_bg_opa(b, LV_OPA_0, 0);
-    lv_obj_set_style_shadow_width(b, 0, 0);
     lv_obj_set_style_radius(b, 12, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(C_BORDER), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
@@ -1144,12 +1153,9 @@ static void build_calendar(lv_obj_t *s)
 
     lv_obj_t *arrow[2];
     for (int i = 0; i < 2; i++) {
-        arrow[i] = lv_btn_create(s);
+        arrow[i] = flat_btn(s);
         lv_obj_set_pos(arrow[i], i ? CAL_W - 56 : 0, 4);
         lv_obj_set_size(arrow[i], 56, 56);
-        /* The default button style draws a shadow outside the object, and
-         * at y=0 the parent clipped it - which is what cut the tops off. */
-        lv_obj_set_style_shadow_width(arrow[i], 0, 0);
         lv_obj_set_style_bg_opa(arrow[i], LV_OPA_0, 0);
         lv_obj_set_style_radius(arrow[i], 14, 0);
         lv_obj_set_style_bg_color(arrow[i], lv_color_hex(C_BORDER_ST), LV_STATE_PRESSED);
@@ -1254,7 +1260,7 @@ static void build_settings(lv_obj_t *s)
     for (int i = 0; i < 7; i++) {
         /* Displayed Mon..Sun, stored bit0=Sun. */
         int wday = (i + 1) % 7;
-        lv_obj_t *p = lv_btn_create(r);
+        lv_obj_t *p = flat_btn(r);
         lv_obj_set_size(p, 92, 56);
         lv_obj_align(p, LV_ALIGN_LEFT_MID, VX + i * 102, 0);
         lv_obj_set_style_radius(p, 28, 0);
@@ -1277,7 +1283,7 @@ static void build_settings(lv_obj_t *s)
     lv_obj_set_width(lbl_footer, BODY_W - 3 * 210 - 2 * 16 - 20);
     const int BW = 210, BG2 = 16, BY = BODY_H - 62;
 
-    lv_obj_t *xt = lv_btn_create(s);
+    lv_obj_t *xt = flat_btn(s);
     lv_obj_set_size(xt, BW, 62);
     lv_obj_set_pos(xt, BODY_W - 3 * BW - 2 * BG2, BY);
     lv_obj_set_style_bg_color(xt, lv_color_hex(C_BORDER_ST), 0);
@@ -1287,7 +1293,7 @@ static void build_settings(lv_obj_t *s)
     lv_obj_add_event_cb(xt, exit_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_center(text(xt, 0, 0, LV_SYMBOL_POWER "  Exit to shell", &lv_font_montserrat_20, C_TEXT2));
 
-    lv_obj_t *rs = lv_btn_create(s);
+    lv_obj_t *rs = flat_btn(s);
     lv_obj_set_size(rs, BW, 62);
     lv_obj_set_pos(rs, BODY_W - 2 * BW - BG2, BY);
     lv_obj_set_style_bg_color(rs, lv_color_hex(C_BORDER_ST), 0);
@@ -1297,7 +1303,7 @@ static void build_settings(lv_obj_t *s)
     lv_obj_add_event_cb(rs, reset_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_center(text(rs, 0, 0, LV_SYMBOL_TRASH "  Reset data", &lv_font_montserrat_20, C_BAD_TEXT));
 
-    lv_obj_t *ex = lv_btn_create(s);
+    lv_obj_t *ex = flat_btn(s);
     lv_obj_set_size(ex, BW, 62);
     lv_obj_set_pos(ex, BODY_W - BW, BY);
     lv_obj_set_style_bg_color(ex, lv_color_hex(C_BORDER_ST), 0);
