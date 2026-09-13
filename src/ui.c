@@ -596,6 +596,13 @@ static void edge_gesture_cb(lv_event_t *e)
     if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) rail_show();
 }
 
+/* Swipe left anywhere on the rail to put it away. */
+static void rail_gesture_cb(lv_event_t *e)
+{
+    (void)e;
+    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_LEFT) rail_hide();
+}
+
 /* A swipe from a 40px strip is a fiddly thing to land on a wall panel, so
  * a plain tap on the grip opens it too. Both are harmless to fire twice. */
 static void edge_click_cb(lv_event_t *e)
@@ -901,6 +908,9 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_t *rail = box(lv_layer_top(), 0, 0, RAIL_W, SCR_H, C_SURF1, 0);
     rail_panel = rail;
     lv_obj_add_flag(rail, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(rail, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(rail, LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(rail, rail_gesture_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_set_style_border_side(rail, LV_BORDER_SIDE_RIGHT, 0);
     lv_obj_set_style_border_color(rail, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(rail, 1, 0);
@@ -908,6 +918,12 @@ static void build_rail(lv_obj_t *parent)
     for (int i = 0; i < 3; i++) {
         lv_obj_t *it = box(rail, 14, 20 + i * 80, 64, 64, C_ACC_BG, 16);
         lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
+        /* A swipe that starts on an icon should still close the rail: the
+         * gesture goes to the pressed object and only walks up through
+         * parents carrying GESTURE_BUBBLE, and the rail itself must not
+         * carry it or the walk would continue past it to nothing. */
+        lv_obj_add_flag(it, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_add_flag(it, LV_OBJ_FLAG_PRESS_LOCK);
         lv_obj_add_event_cb(it, rail_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         lv_obj_t *l = lv_label_create(it);
         lv_label_set_text(l, icons[i]);
