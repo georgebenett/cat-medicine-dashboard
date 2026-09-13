@@ -874,6 +874,13 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_t *edge = box(lv_layer_top(), 0, 0, EDGE_W, SCR_H, C_BG, 0);
     lv_obj_set_style_bg_opa(edge, LV_OPA_0, 0);
     lv_obj_add_flag(edge, LV_OBJ_FLAG_CLICKABLE);
+    /* Without this LVGL re-searches the object under the finger every poll
+     * (lv_indev.c: "If there is last object but it is not scrolled and not
+     * protected also search"), so a swipe that leaves this 40px strip hands
+     * the gesture - and the release click - to whatever is underneath. The
+     * photo advanced instead of the rail appearing. PRESS_LOCK keeps the
+     * whole press with the strip. */
+    lv_obj_add_flag(edge, LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(edge, edge_gesture_cb, LV_EVENT_GESTURE, NULL);
 
     lv_obj_t *rail = box(lv_layer_top(), 0, 0, RAIL_W, SCR_H, C_SURF1, 0);
