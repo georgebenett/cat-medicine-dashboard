@@ -47,15 +47,28 @@
 #define SCR_W    1280
 #define SCR_H    720
 #define RAIL_W   92
-#define PAD      40
+#define PAD      22      /* was 40; 17% of the panel was margin */
 /* The rail is an overlay now, so the body keeps the full width and only
  * loses the left 92px while the rail is actually on screen. */
 #define BODY_X   PAD
 #define BODY_W   (SCR_W - 2 * PAD)
 #define BODY_H   (SCR_H - 2 * PAD)
-#define PHOTO_W  480     /* 480x640 = 3:4, matching portrait photos */
+#define PHOTO_W  500     /* with PHOTO_H this is ~3:4, matching the photos */
 #define PHOTO_H  BODY_H   /* fills the body, bottom-aligned with the week card */
 #define GAP      24
+
+/* Right-column stack. Heights and gaps add up to BODY_H exactly, so growing
+ * the body grows the cards rather than opening one large hole above the
+ * week strip. */
+#define CARD_GAP  16
+#define STATUS_H  168
+#define BTNS_H    128
+#define CLOCK_H   132
+#define WEEK_H    200
+#define STATUS_Y  0
+#define BTNS_Y    (STATUS_H + CARD_GAP)
+#define CLOCK_Y   (BTNS_Y + BTNS_H + CARD_GAP)
+#define WEEK_Y    (CLOCK_Y + CLOCK_H + CARD_GAP)
 #define EDGE_W   40      /* swipe-from-here strip */
 #define RAIL_SECS 30     /* auto-hide */
 #define RIGHT_X  (PHOTO_W + GAP)
@@ -1103,7 +1116,7 @@ static void build_home(lv_obj_t *s)
 {
     build_photo(s, 0, 0, PHOTO_W, PHOTO_H);
 
-    card_status = box(s, RIGHT_X, 0, RIGHT_W, 160, C_SURF1, 20);
+    card_status = box(s, RIGHT_X, STATUS_Y, RIGHT_W, STATUS_H, C_SURF1, 20);
     status_dot     = dot(card_status, 14, C_OK_FILL);
     lv_obj_set_pos(status_dot, 32, 47);
     lbl_status     = text(card_status, 62, 30, "", &lv_font_montserrat_32, C_TEXT);
@@ -1111,8 +1124,8 @@ static void build_home(lv_obj_t *s)
 
     int bw = BTN_W;
     btn_dose = flat_btn(s);
-    lv_obj_set_pos(btn_dose, RIGHT_X, 182);
-    lv_obj_set_size(btn_dose, bw, 120);
+    lv_obj_set_pos(btn_dose, RIGHT_X, BTNS_Y);
+    lv_obj_set_size(btn_dose, bw, BTNS_H);
     lv_obj_set_style_bg_color(btn_dose, lv_color_hex(C_ACC_FILL), 0);
     lv_obj_set_style_radius(btn_dose, 16, 0);
     /* Explicit, so the fit is arithmetic rather than theme-dependent:
@@ -1149,8 +1162,8 @@ static void build_home(lv_obj_t *s)
     lv_label_set_text(lbl_btn_dose, "Log dose given");
 
     lv_obj_t *b2 = flat_btn(s);
-    lv_obj_set_pos(b2, RIGHT_X + bw + 22, 182);
-    lv_obj_set_size(b2, bw, 120);
+    lv_obj_set_pos(b2, RIGHT_X + bw + 22, BTNS_Y);
+    lv_obj_set_size(b2, bw, BTNS_H);
     lv_obj_set_style_bg_color(b2, lv_color_hex(C_BORDER_ST), 0);
     lv_obj_set_style_bg_opa(b2, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(b2, 0, 0);
@@ -1162,7 +1175,7 @@ static void build_home(lv_obj_t *s)
 
     /* Clock and weather share one card in the gap between the buttons and
      * the week strip: time and date left, conditions right. */
-    lv_obj_t *ck = box(s, RIGHT_X, 314, RIGHT_W, 124, C_SURF1, 20);
+    lv_obj_t *ck = box(s, RIGHT_X, CLOCK_Y, RIGHT_W, CLOCK_H, C_SURF1, 20);
     lbl_home_clock = text(ck, 28, 18, "", &lv_font_montserrat_40, C_TEXT);
     lbl_home_date  = text(ck, 28, 76, "", &lv_font_montserrat_20, C_TEXT2);
 
@@ -1174,7 +1187,7 @@ static void build_home(lv_obj_t *s)
     lbl_wx_desc = text(ck, 0, 0, "", &lv_font_montserrat_20, C_TEXT2);
     lv_obj_align(lbl_wx_desc, LV_ALIGN_RIGHT_MID, -100, 20);
 
-    lv_obj_t *wk = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
+    lv_obj_t *wk = box(s, RIGHT_X, WEEK_Y, RIGHT_W, WEEK_H, C_SURF1, 20);
     card_week = wk;
     text(wk, 30, 22, "This week", &lv_font_montserrat_20, C_TEXT2);
     lbl_week_no = text(wk, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
@@ -1217,7 +1230,7 @@ static void pop_row(int idx, int rows, const char *icon, const char *label,
 static void build_event_popover(void)
 {
     const int x = BODY_X + RIGHT_X + BTN_W + 22;
-    const int y = PAD + 182 + 120 + 10;
+    const int y = PAD + BTNS_Y + BTNS_H + 10;
     pop_event = box(lv_layer_top(), x, y, POP_W, 2 * POP_RH + 16, C_BORDER_ST, 18);
     lv_obj_set_style_pad_all(pop_event, 8, 0);
     lv_obj_set_style_border_width(pop_event, 1, 0);
@@ -1233,7 +1246,7 @@ static void build_event_popover(void)
  * Swedish vowels - LV_SYMBOL_RIGHT and plain spellings instead. */
 static void build_transit(lv_obj_t *s)
 {
-    card_transit = box(s, RIGHT_X, BODY_H - 190, RIGHT_W, 190, C_SURF1, 20);
+    card_transit = box(s, RIGHT_X, WEEK_Y, RIGHT_W, WEEK_H, C_SURF1, 20);
     lv_obj_add_flag(card_transit, LV_OBJ_FLAG_HIDDEN);
 
     text(card_transit, 30, 16, "Varnhem " LV_SYMBOL_RIGHT " Scheeleparken",
