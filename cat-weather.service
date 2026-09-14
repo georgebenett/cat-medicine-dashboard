@@ -6,5 +6,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=georges
-WorkingDirectory=/home/georges/lvgl_app
-ExecStart=/home/georges/lvgl_app/weather.py
+WorkingDirectory=/home/georges/cat-medicine-dashboard
+ExecStart=/home/georges/cat-medicine-dashboard/weather.py

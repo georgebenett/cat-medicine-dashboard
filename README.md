@@ -58,8 +58,8 @@ Raspberry Pi OS Bookworm or later, with the panel already working under
 fetches it:
 
 ```sh
-git clone https://github.com/georgebenett/cat-medicine-dashboard.git ~/lvgl_app
-cd ~/lvgl_app
+git clone https://github.com/georgebenett/cat-medicine-dashboard.git ~/cat-medicine-dashboard
+cd ~/cat-medicine-dashboard
 ./setup.sh          # clones LVGL release/v8.3, builds. A few minutes on a 3A+.
 ```
 
@@ -79,7 +79,7 @@ at boot and restarts the dashboard:
 ./deploy.sh
 ```
 
-> The unit files hardcode `/home/georges/lvgl_app`. Edit the five
+> The unit files hardcode `/home/georges/cat-medicine-dashboard`. Edit the five
 > `cat-*.service` / `lvglapp.service` files if your user or path differs.
 
 That is enough for the dashboard itself. The rest is optional.
@@ -121,7 +121,7 @@ shutdown truncated the file:
 ```sh
 cd ~/cat_backup && git log --oneline         # every backup is a commit
 git checkout <commit> -- cat_log.csv
-cp cat_log.csv ~/lvgl_app/ && sudo systemctl restart lvglapp
+cp cat_log.csv ~/cat-medicine-dashboard/ && sudo systemctl restart lvglapp
 ```
 
 ## Configuration

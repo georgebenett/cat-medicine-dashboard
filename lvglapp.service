@@ -4,7 +4,7 @@ After=multi-user.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/georges/lvgl_app
+WorkingDirectory=/home/georges/cat-medicine-dashboard
 
 # Take the kernel's framebuffer console off /dev/fb0 for as long as the
 # dashboard owns the panel. console=tty1 on the kernel cmdline means every
@@ -16,7 +16,7 @@ WorkingDirectory=/home/georges/lvgl_app
 ExecStartPre=-/bin/sh -c 'p=$$(grep -l "frame buffer device" /sys/class/vtconsole/*/name | head -1); [ -n "$$p" ] && echo 0 > "$$(dirname "$$p")/bind"'
 ExecStopPost=-/bin/sh -c 'p=$$(grep -l "frame buffer device" /sys/class/vtconsole/*/name | head -1); [ -n "$$p" ] && echo 1 > "$$(dirname "$$p")/bind"'
 
-ExecStart=/home/georges/lvgl_app/app
+ExecStart=/home/georges/cat-medicine-dashboard/app
 # on-failure, not always: the Exit to shell button calls exit(0), and that
 # has to actually stay stopped. A crash or a signal still gets restarted.
 Restart=on-failure
