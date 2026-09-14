@@ -44,8 +44,9 @@ local bus stop.
 ## Hardware
 
 - Raspberry Pi 3A+ (anything with a DSI connector and 512MB will do)
-- Waveshare 9" DSI touch panel, 720x1280 - mounted landscape, so the UI
-  is 1280x720 and LVGL rotates in software
+- [Waveshare 9" DSI touch panel (B)](https://www.waveshare.com/9-dsi-touch-b.htm),
+  720x1280 - mounted landscape, so the UI is 1280x720 and LVGL rotates in
+  software
 - A **good** power supply. See [Power](#power) - this is not optional.
 
 ## Setup
