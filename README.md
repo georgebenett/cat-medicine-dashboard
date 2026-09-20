@@ -31,9 +31,13 @@ straight to the framebuffer - no X, no Wayland, no browser.
   with month/streak/vomiting stats and a recent list. Food is logged and
   listed but deliberately not marked on the grid: it happens most days and
   would colour in every cell.
-- **Lights** - one row per Philips Hue room: a toggle, a brightness slider
-  and the current level. It follows the bridge, so a lamp switched from a
-  phone or a wall switch shows up here within a second.
+- **Lights** - one row per Philips Hue room: tap anywhere on the row to
+  toggle it, drag the slider to dim. The row is tinted with the room's own
+  colour temperature, so a warm room reads warm. It follows the bridge, so
+  a lamp switched from a phone or a wall switch shows up here within a
+  second. A room whose bulbs have dropped off the Zigbee mesh says
+  *unreachable* and disables its controls, rather than showing a working
+  switch that silently does nothing.
 - **Settings** - backlight, night dim, which weekdays are medicine days, a
   reminder toggle, and buttons to export or reset the log.
 
@@ -240,7 +244,7 @@ network takes - and this Pi's network is the least reliable part of it.
 | `cat-backup` | hourly | pushes `cat_log.csv` |
 | `cat-wifi` | 2 min | bounces a wedged link |
 | `cat-dim` | at boot | holds the panel dark |
-| `cat-hue` | daemon, 2s | `hue.txt`, reads `hue.cmd` |
+| `cat-hue` | daemon, 2s state / 30s structure | `hue.txt`, reads `hue.cmd` |
 
 `cat-hue` is the one daemon rather than a timer: a light switch that reacts
 in five minutes is not a light switch. It is the same file hand-off in both
