@@ -12,6 +12,7 @@
  */
 #include "ui.h"
 #include "sched.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -352,9 +353,48 @@ static void transit_load(void)
  * the length of the request, which is what the file hand-off exists to
  * avoid. Rooms are addressed by index - hue.py sorts them by name. */
 #define MAX_ROOMS 4
-static struct { char name[32]; int on, bri; } rooms[MAX_ROOMS];
+static struct { char name[32]; int on, bri, reachable, mirek; } rooms[MAX_ROOMS];
 static int  n_rooms;
 static long hue_updated;
+
+/* A room icon from the symbols the font actually carries - there is no
+ * emoji coverage here, only LV_SYMBOL_*. Unmatched rooms get the bulb. */
+static const char *room_icon(const char *name)
+{
+    static const struct { const char *key, *sym; } map[] = {
+        { "hall",    LV_SYMBOL_HOME     },
+        { "living",  LV_SYMBOL_VIDEO    },
+        { "lounge",  LV_SYMBOL_VIDEO    },
+        { "studio",  LV_SYMBOL_KEYBOARD },
+        { "office",  LV_SYMBOL_KEYBOARD },
+        { "desk",    LV_SYMBOL_KEYBOARD },
+        { "bath",    LV_SYMBOL_TINT     },
+        { "kitchen", LV_SYMBOL_LIST     },
+        { "bed",     LV_SYMBOL_EYE_CLOSE},
+    };
+    char low[32];
+    size_t i;
+    for (i = 0; i + 1 < sizeof low && name[i]; i++)
+        low[i] = (char)tolower((unsigned char)name[i]);
+    low[i] = '\0';
+    for (i = 0; i < sizeof map / sizeof map[0]; i++)
+        if (strstr(low, map[i].key)) return map[i].sym;
+    return LV_SYMBOL_CHARGE;
+}
+
+/* Hue reports colour temperature in mireks (153 cool .. 500 warm). Tint
+ * the row with roughly that white so a warm room reads warm at a glance.
+ * A straight lerp between the two ends is plenty for a tint; nobody is
+ * colour-matching a wall panel. 0 means the room has no tunable bulbs. */
+static uint32_t mirek_color(int mirek)
+{
+    if (mirek < 153) return C_WARN_TEXT;          /* including 0 = unknown */
+    if (mirek > 500) mirek = 500;
+    int t = (mirek - 153) * 255 / (500 - 153);    /* 0 cool .. 255 warm */
+    int g = 244 - 97 * t / 255;
+    int b = 255 - 214 * t / 255;
+    return (uint32_t)((255 << 16) | (g << 8) | b);
+}
 
 static void hue_load(void)
 {
@@ -368,12 +408,18 @@ static void hue_load(void)
         if (strncmp(line, "room=", 5) || n_rooms >= MAX_ROOMS) continue;
         char *save = NULL;
         int field = 0;
-        for (char *tok = strtok_r(line + 5, "|\n", &save); tok && field < 3;
+        /* Assume reachable: an older hue.py writes three fields, and a
+         * room you cannot control is the worse thing to guess wrong. */
+        rooms[n_rooms].reachable = 1;
+        rooms[n_rooms].mirek = 0;
+        for (char *tok = strtok_r(line + 5, "|\n", &save); tok && field < 5;
              tok = strtok_r(NULL, "|\n", &save), field++) {
             switch (field) {
                 case 0: snprintf(rooms[n_rooms].name, sizeof rooms[0].name, "%s", tok); break;
                 case 1: rooms[n_rooms].on  = atoi(tok); break;
                 case 2: rooms[n_rooms].bri = atoi(tok); break;
+                case 3: rooms[n_rooms].reachable = atoi(tok); break;
+                case 4: rooms[n_rooms].mirek = atoi(tok); break;
             }
         }
         if (field >= 3) n_rooms++;
@@ -523,7 +569,7 @@ static time_t    rail_shown_at;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
-static struct { lv_obj_t *card, *name, *sw, *sld, *val; } room_row[MAX_ROOMS];
+static struct { lv_obj_t *card, *ico, *name, *sw, *sld, *val; } room_row[MAX_ROOMS];
 static lv_obj_t *lbl_hue_none;
 static int       laid_out_rooms = -1;   /* card geometry is sized to the count */
 static time_t    toast_until;
@@ -1358,16 +1404,32 @@ static lv_obj_t *settings_row(int idx, const char *icon, const char *label)
 
 static void refresh_lights(void);
 
-static void room_sw_cb(lv_event_t *e)
+static void room_set_on(int i, int on)
 {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i >= n_rooms) return;
-    rooms[i].on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    if (i >= n_rooms || !rooms[i].reachable) return;
+    rooms[i].on = on;
     /* Switching on a room the bridge last saw at 0% would turn it on at
      * nothing. Give it a level worth seeing. */
     if (rooms[i].on && rooms[i].bri == 0) rooms[i].bri = 60;
     hue_send(i);
     refresh_lights();
+}
+
+static void room_sw_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    room_set_on(i, lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
+/* The whole row is the tap target: an 84px switch is a small thing to hit
+ * standing at a wall panel. The slider and switch are children and LVGL
+ * does not bubble events by default, so a press that lands on either of
+ * them never reaches this. */
+static void room_card_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms) return;
+    room_set_on(i, !rooms[i].on);
 }
 
 /* Dragging fires this per pixel. Writing a command each time would queue
@@ -1384,7 +1446,7 @@ static void room_sld_cb(lv_event_t *e)
 static void room_sld_save_cb(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i >= n_rooms) return;
+    if (i >= n_rooms || !rooms[i].reachable) return;
     /* Dragging a dark room up is how you turn it on; no second tap. */
     if (rooms[i].bri > 0 && !rooms[i].on) rooms[i].on = 1;
     hue_send(i);
@@ -1396,10 +1458,14 @@ static void build_lights(lv_obj_t *s)
     for (int i = 0; i < MAX_ROOMS; i++) {
         lv_obj_t *c = box(s, 0, 0, BODY_W, 100, C_SURF1, 20);
         lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(c, LV_OBJ_FLAG_PRESS_LOCK);
+        lv_obj_add_event_cb(c, room_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         room_row[i].card = c;
 
         lv_obj_t *ico = text(c, 0, 0, LV_SYMBOL_CHARGE, &lv_font_montserrat_28, C_WARN_TEXT);
         lv_obj_align(ico, LV_ALIGN_LEFT_MID, 28, 0);
+        room_row[i].ico = ico;
 
         room_row[i].name = text(c, 0, 0, "", &lv_font_montserrat_28, C_TEXT);
         lv_obj_align(room_row[i].name, LV_ALIGN_LEFT_MID, 80, 0);
@@ -1464,7 +1530,42 @@ static void refresh_lights(void)
     }
 
     for (int i = 0; i < n_rooms; i++) {
+        int live = rooms[i].reachable;
+        /* Tint by the room's own colour temperature, but only while it is
+         * lit: a dark room glowing warm on the panel reads as switched on. */
+        uint32_t tint = (live && rooms[i].on) ? mirek_color(rooms[i].mirek) : C_MUTED;
+
+        lv_label_set_text(room_row[i].ico, room_icon(rooms[i].name));
+        lv_obj_set_style_text_color(room_row[i].ico, lv_color_hex(tint), 0);
         lv_label_set_text(room_row[i].name, rooms[i].name);
+        lv_obj_set_style_text_color(room_row[i].name,
+                                    lv_color_hex(live ? C_TEXT : C_MUTED), 0);
+
+        /* An unreachable bulb is not an off bulb, and showing "0%" beside a
+         * working switch invites taps that silently do nothing. */
+        if (!live) {
+            lv_label_set_text(room_row[i].val, LV_SYMBOL_WARNING "  unreachable");
+            lv_obj_set_style_text_color(room_row[i].val, lv_color_hex(C_MUTED), 0);
+            /* Sits where the slider was: at the 930 column it would run
+             * into the switch. */
+            lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, 400, 0);
+            lv_obj_add_flag(room_row[i].sld, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_state(room_row[i].sw, LV_STATE_DISABLED);
+            lv_obj_clear_state(room_row[i].sw, LV_STATE_CHECKED);
+            lv_obj_clear_flag(room_row[i].card, LV_OBJ_FLAG_CLICKABLE);
+            continue;
+        }
+
+        lv_obj_clear_flag(room_row[i].sld, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_state(room_row[i].sw, LV_STATE_DISABLED);
+        lv_obj_add_flag(room_row[i].card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_text_color(room_row[i].val, lv_color_hex(C_TEXT2), 0);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, 930, 0);
+        lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(tint), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(tint), LV_PART_KNOB);
+        lv_obj_set_style_bg_color(room_row[i].sw, lv_color_hex(tint),
+                                  LV_PART_INDICATOR | LV_STATE_CHECKED);
+
         /* Do not yank the knob out from under a finger mid-drag. */
         if (!lv_obj_has_state(room_row[i].sld, LV_STATE_PRESSED)) {
             lv_slider_set_value(room_row[i].sld, rooms[i].bri, LV_ANIM_OFF);

@@ -25,7 +25,8 @@ import json, os, ssl, sys, time, urllib.request
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-POLL = 2.0          # state refresh; the bridge is on the LAN, this is cheap
+POLL = 2.0          # on/off + brightness; the bridge is on the LAN, this is cheap
+STRUCT_EVERY = 30.0 # rooms, bulb membership, mesh health - all near-static
 CMD_POLL = 0.2      # how fast a press reaches the bulb
 
 def cfg(key, default=None):
@@ -76,27 +77,63 @@ def pair():
     return 0
 
 
-def rooms():
-    """[(group_id, name, on, brightness)] sorted by name - index is the address."""
+def structure():
+    """[{gid,name,reachable,mirek}] sorted by name - index is the address.
+
+    Rooms, bulb membership and mesh connectivity barely ever change, so
+    this runs on its own slow clock while the on/off state is polled.
+    """
     rs = api('room')['data']
-    groups = {g['id']: g for g in api('grouped_light')['data']}
+    devices = {d['id']: d for d in api('device')['data']}
+    lights = {l['id']: l for l in api('light')['data']}
+    conn = {z.get('owner', {}).get('rid'): z.get('status')
+            for z in api('zigbee_connectivity')['data']}
+
     out = []
     for r in rs:
         gid = next((s['rid'] for s in r['services'] if s['rtype'] == 'grouped_light'), None)
-        g = groups.get(gid)
-        if not g:
+        if not gid:
             continue
-        out.append((gid, r['metadata']['name'],
-                    1 if g.get('on', {}).get('on') else 0,
-                    int(round(g.get('dimming', {}).get('brightness', 0)))))
-    out.sort(key=lambda x: x[1].lower())
+        mireks, reach = [], False
+        for c in r['children']:
+            dev = devices.get(c['rid'])
+            if not dev:
+                continue
+            # One bulb off the mesh in a four-spot room still leaves
+            # something worth controlling; only call the room unreachable
+            # when nothing in it answers.
+            if conn.get(dev['id']) == 'connected':
+                reach = True
+            for s in dev['services']:
+                if s['rtype'] != 'light':
+                    continue
+                m = ((lights.get(s['rid']) or {}).get('color_temperature') or {}).get('mirek')
+                if m:
+                    mireks.append(m)
+        out.append({'gid': gid, 'name': r['metadata']['name'],
+                    'reachable': 1 if reach else 0,
+                    # 0 means the room has no tunable-white bulbs at all.
+                    'mirek': int(sum(mireks) / len(mireks)) if mireks else 0,
+                    'on': 0, 'bri': 0})
+    out.sort(key=lambda x: x['name'].lower())
     return out
+
+
+def read_state(rs):
+    groups = {g['id']: g for g in api('grouped_light')['data']}
+    for r in rs:
+        g = groups.get(r['gid'], {})
+        r['on'] = 1 if g.get('on', {}).get('on') else 0
+        r['bri'] = int(round(g.get('dimming', {}).get('brightness', 0)))
+    return rs
 
 
 def write_state(rs):
     lines = ["updated=%d" % int(time.time())]
-    for _, name, on, bri in rs:
-        lines.append("room=%s|%d|%d" % (name.replace('|', ' '), on, bri))
+    for r in rs:
+        lines.append("room=%s|%d|%d|%d|%d" % (r['name'].replace('|', ' '),
+                                              r['on'], r['bri'],
+                                              r['reachable'], r['mirek']))
     out = "\n".join(lines) + "\n"
     with open('hue.txt.tmp', 'w') as f:
         f.write(out)
@@ -120,7 +157,7 @@ def apply(rs, line):
     # bridge rejects it outright on some firmwares.
     if on and bri > 0:
         body['dimming'] = {'brightness': max(1, min(100, bri))}
-    api('grouped_light/%s' % rs[idx][0], 'PUT', body)
+    api('grouped_light/%s' % rs[idx]['gid'], 'PUT', body)
 
 
 def main():
@@ -136,17 +173,27 @@ def main():
         return 0
 
     if '--once' in sys.argv:
-        print(write_state(rooms()).strip())
+        print(write_state(read_state(structure())).strip())
         return 0
 
-    rs, last_poll = [], 0.0
+    rs, last_poll, last_struct = [], 0.0, 0.0
     while True:
         now = time.monotonic()
-        if now - last_poll >= POLL or not rs:
+
+        if not rs or now - last_struct >= STRUCT_EVERY:
+            # Set the timer even on failure, or a bridge that is down turns
+            # this loop into a retry storm.
+            last_struct = now
+            try:
+                rs = structure()
+                last_poll = 0.0
+            except Exception as e:
+                print("hue structure failed: %s" % e, file=sys.stderr, flush=True)
+
+        if rs and now - last_poll >= POLL:
             last_poll = now
             try:
-                rs = rooms()
-                write_state(rs)
+                write_state(read_state(rs))
             except Exception as e:
                 # Bridge rebooting or wifi dropped: keep the old file and
                 # retry. The UI ages it out on its own.
