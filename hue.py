@@ -465,7 +465,13 @@ def main():
         return 0
 
     if '--once' in sys.argv:
-        print(write_state(read_state(structure())).strip())
+        # Print, do not write: a one-shot process never runs the automation,
+        # so writing hue.txt here would stamp "automation off" over whatever
+        # the daemon is actually doing until its next poll.
+        rs = read_state(structure())
+        for r in rs:
+            print("room=%s|%d|%d|%d|%d" % (r['name'], r['on'], r['bri'],
+                                           r['reachable'], r['mirek']))
         return 0
 
     rs, last_poll, last_struct, last_auto, last_cfg = [], 0.0, 0.0, 0.0, 0.0
