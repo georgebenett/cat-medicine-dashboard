@@ -1603,11 +1603,22 @@ static void room_hold_cb(lv_event_t *e)
     lv_obj_align_to(pop_ct, card, LV_ALIGN_RIGHT_MID, -20, 0);
     lv_obj_move_foreground(pop_ct);
 
+    /* Ring the nearest preset, and only if it is close enough to call set.
+     * Nearest rather than a per-button window: the presets are 40 mireks
+     * apart at the cool end, so any fixed window wide enough to feel
+     * forgiving rings two buttons at once - 200 mirek, which is exactly
+     * where the daylight automation parks the room, sits between Daylight
+     * and Energize. */
+    int best = -1;
+    for (int p = 0; p < N_CT_PRESET; p++)
+        if (best < 0 || abs(rooms[i].mirek - CT_PRESET[p].mirek)
+                      < abs(rooms[i].mirek - CT_PRESET[best].mirek))
+            best = p;
+    if (abs(rooms[i].mirek - CT_PRESET[best].mirek) >= 30) best = -1;
+
     for (int p = 0; p < N_CT_PRESET; p++) {
         lv_obj_t *b = lv_obj_get_child(pop_ct, p);
-        /* Ring the one already set, within half a preset step. */
-        int sel = abs(rooms[i].mirek - CT_PRESET[p].mirek) < 30;
-        lv_obj_set_style_border_width(b, sel ? 3 : 0, 0);
+        lv_obj_set_style_border_width(b, p == best ? 3 : 0, 0);
         lv_obj_set_style_border_color(b, lv_color_hex(C_TEXT), 0);
     }
 }
