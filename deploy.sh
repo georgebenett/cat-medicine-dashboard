@@ -52,9 +52,12 @@ if [ "$changed" = 1 ]; then
     sudo systemctl enable lvglapp cat-backup.timer cat-weather.timer cat-wifi.timer \
         cat-dim.service cat-transit.timer cat-hue.service
     sudo systemctl start cat-backup.timer cat-weather.timer cat-wifi.timer cat-transit.timer
-    # A daemon, not a timer: restart so a changed hue.py actually takes effect.
-    sudo systemctl restart cat-hue.service
 fi
+
+# Long-running, so it holds whatever hue.py said when it started. The timers
+# re-read their scripts every firing; this one does not, and restarting it
+# only when its *unit* changed left the old code running after a deploy.
+sudo systemctl restart cat-hue.service
 
 sudo systemctl start lvglapp
 sleep 2
