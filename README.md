@@ -31,13 +31,15 @@ straight to the framebuffer - no X, no Wayland, no browser.
   with month/streak/vomiting stats and a recent list. Food is logged and
   listed but deliberately not marked on the grid: it happens most days and
   would colour in every cell.
-- **Lights** - one row per Philips Hue room: tap anywhere on the row to
-  toggle it, drag the slider to dim. The row is tinted with the room's own
-  colour temperature, so a warm room reads warm. It follows the bridge, so
-  a lamp switched from a phone or a wall switch shows up here within a
-  second. A room whose bulbs have dropped off the Zigbee mesh says
-  *unreachable* and disables its controls, rather than showing a working
-  switch that silently does nothing.
+- **Lights** - one row per Philips Hue room. Tap anywhere on the row to
+  toggle it; the top slider dims and the lower one sets white balance,
+  with the knob painted the temperature it is about to apply. Rooms whose
+  bulbs are fixed-white show only the dimmer. There is no on/off switch on
+  purpose: the row itself is the target, which is a far easier thing to
+  hit standing at a wall panel. It follows the bridge, so a lamp switched
+  from a phone or a wall switch shows up here within a second, and a room
+  whose bulbs have dropped off the Zigbee mesh says *unreachable* and
+  disables its controls instead of accepting taps that do nothing.
 - **Settings** - backlight, night dim, which weekdays are medicine days, a
   reminder toggle, and buttons to export or reset the log.
 
@@ -339,7 +341,7 @@ Debug knobs, no rebuild needed:
 
 | Variable | Effect |
 |---|---|
-| `CAT_SCREEN=0\|1\|2\|3` | open on Today / Calendar / Lights / Settings |
+| `CAT_SCREEN=0\|1\|2\|3` | open on Today / Calendar / Lights / Settings (returns home after 30s idle) |
 | `CAT_POPUP=1` | open the Log event sheet |
 | `CAT_TOAST="text"` | pin a toast up |
 | `TOUCH_DEBUG=1` | touch coordinates to stderr |

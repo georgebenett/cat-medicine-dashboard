@@ -72,7 +72,7 @@
 #define WEEK_Y    (CLOCK_Y + CLOCK_H + CARD_GAP)
 #define EDGE_W   40      /* swipe-from-here strip */
 #define RAIL_SECS 30     /* auto-hide */
-#define HOME_SECS 10     /* idle on any other screen -> back to Today */
+#define HOME_SECS 30     /* idle on any other screen -> back to Today */
 #define RIGHT_X  (PHOTO_W + GAP)
 #define RIGHT_W  (BODY_W - RIGHT_X)
 #define BTN_W    ((RIGHT_W - 22) / 2)
@@ -1540,7 +1540,10 @@ static void build_lights(lv_obj_t *s)
         lv_slider_set_range(ct, MIREK_MIN, MIREK_MAX);
         lv_obj_add_event_cb(ct, room_ct_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
         lv_obj_add_event_cb(ct, room_ct_save_cb, LV_EVENT_RELEASED, (void *)(intptr_t)i);
-        lv_obj_set_style_bg_color(ct, lv_color_hex(C_BORDER_ST), LV_PART_INDICATOR);
+        /* No fill: warmth is a position on a scale, not an amount of
+         * something, so a filled-to-here bar would be reading the control
+         * as a second brightness. The knob alone carries the value. */
+        lv_obj_set_style_bg_opa(ct, LV_OPA_0, LV_PART_INDICATOR);
         room_row[i].sld_ct = ct;
 
         room_row[i].val_ct = text(c, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
