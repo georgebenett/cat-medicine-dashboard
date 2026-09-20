@@ -1477,6 +1477,11 @@ static const struct { const char *name; int mirek, kelvin; } CT_PRESET[] = {
     { "Energize", 153, 6500 },
 };
 #define N_CT_PRESET ((int)(sizeof CT_PRESET / sizeof CT_PRESET[0]))
+/* Two stacked lines of montserrat_20 (25px), laid out explicitly. */
+#define CT_LINE   25
+#define CT_GAP    10
+#define CT_PAD_Y  18
+#define CT_BTN_H  (CT_PAD_Y * 2 + CT_LINE * 2 + CT_GAP)
 
 static lv_obj_t *pop_ct;
 static int       pop_ct_room = -1;
@@ -1616,28 +1621,34 @@ static void build_lights(lv_obj_t *s)
     }
 
     /* One sheet reused by every row; room_hold_cb moves it. */
-    pop_ct = box(s, 0, 0, N_CT_PRESET * 150 + 20, 116, C_BORDER_ST, 20);
+    pop_ct = box(s, 0, 0, N_CT_PRESET * 150 + 20, CT_BTN_H + 24, C_BORDER_ST, 20);
     lv_obj_add_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_border_width(pop_ct, 1, 0);
     lv_obj_set_style_border_color(pop_ct, lv_color_hex(C_BORDER), 0);
     for (int p = 0; p < N_CT_PRESET; p++) {
         lv_obj_t *b = flat_btn(pop_ct);
-        lv_obj_set_size(b, 138, 92);
+        lv_obj_set_size(b, 138, CT_BTN_H);
         lv_obj_set_pos(b, 10 + p * 150, 12);
         lv_obj_set_style_radius(b, 16, 0);
+        /* lv_btn inherits the theme's padding, and aligning one label to
+         * TOP_MID and the other to BOTTOM_MID measures both from inside
+         * it - on a short button the two land on each other. Zero the
+         * padding and place both from the top, so the spacing is the
+         * arithmetic below and not whatever the theme happens to use. */
+        lv_obj_set_style_pad_all(b, 0, 0);
         /* Each swatch is painted the white it sets, so the choice is
          * visible rather than a word you have to translate to a colour. */
         lv_obj_set_style_bg_color(b, lv_color_hex(mirek_color(CT_PRESET[p].mirek)), 0);
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
         lv_obj_add_event_cb(b, ct_preset_cb, LV_EVENT_CLICKED, (void *)(intptr_t)p);
         lv_obj_t *l = text(b, 0, 0, CT_PRESET[p].name, &lv_font_montserrat_20, C_BG);
-        lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 22);
+        lv_obj_align(l, LV_ALIGN_TOP_MID, 0, CT_PAD_Y);
         lv_obj_t *k = lv_label_create(b);
         lv_label_set_text_fmt(k, "%dK", CT_PRESET[p].kelvin);
         lv_obj_set_style_text_font(k, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(k, lv_color_hex(C_BG), 0);
         lv_obj_set_style_text_opa(k, LV_OPA_60, 0);
-        lv_obj_align(k, LV_ALIGN_BOTTOM_MID, 0, -22);
+        lv_obj_align(k, LV_ALIGN_TOP_MID, 0, CT_PAD_Y + CT_LINE + CT_GAP);
     }
 
     /* Shown when hue.py is not writing: a wall panel that silently does
