@@ -1568,12 +1568,12 @@ static void room_sld_save_cb(lv_event_t *e)
 }
 
 /* Kelvin is what the number on a bulb box says; mireks are the API's unit.
- * Rounded to 50K because the slider is 347 steps wide and nobody adjusts a
- * lamp to 2843K. */
+ * Rounded to 100K: nobody adjusts a lamp to 2843K, and at 50K the cool end
+ * printed 6550 next to a preset button that says 6500. */
 static int mirek_kelvin(int mirek)
 {
     if (mirek < MIREK_MIN) mirek = MIREK_MIN;
-    return ((1000000 / mirek) + 25) / 50 * 50;
+    return ((1000000 / mirek) + 50) / 100 * 100;
 }
 
 static void build_lights(lv_obj_t *s)

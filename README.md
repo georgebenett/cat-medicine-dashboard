@@ -32,14 +32,16 @@ straight to the framebuffer - no X, no Wayland, no browser.
   listed but deliberately not marked on the grid: it happens most days and
   would colour in every cell.
 - **Lights** - one row per Philips Hue room. Tap anywhere on the row to
-  toggle it; the top slider dims and the lower one sets white balance,
-  with the knob painted the temperature it is about to apply. Rooms whose
-  bulbs are fixed-white show only the dimmer. There is no on/off switch on
-  purpose: the row itself is the target, which is a far easier thing to
-  hit standing at a wall panel. It follows the bridge, so a lamp switched
-  from a phone or a wall switch shows up here within a second, and a room
-  whose bulbs have dropped off the Zigbee mesh says *unreachable* and
-  disables its controls instead of accepting taps that do nothing.
+  toggle it, drag the slider to dim, and **hold** a row with tunable-white
+  bulbs to pick between three whites - Relax 2700K, Daylight 4500K and
+  Energize 6500K, each swatch painted the colour it sets. Three presets
+  rather than a slider: a 347-step range is a lot of choice for something
+  people want in about three states. There is no on/off switch on purpose,
+  the row itself is the target - far easier to hit standing at a wall
+  panel. It follows the bridge, so a lamp switched from a phone or a wall
+  switch shows up here within a second, and a room whose bulbs have
+  dropped off the Zigbee mesh says *unreachable* and disables its controls
+  instead of accepting taps that do nothing.
 - **Settings** - backlight, night dim, which weekdays are medicine days, a
   reminder toggle, and buttons to export or reset the log.
 
