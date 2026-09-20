@@ -1465,6 +1465,53 @@ static void room_set_on(int i, int on)
  * and two ways to do the same thing on one row is one too many. The
  * sliders are children and LVGL does not bubble events by default, so a
  * press that lands on one never reaches this. */
+/* Three whites rather than a slider: a 347-step range is a lot of choice
+ * for a thing people actually want in one of about three states, and a
+ * thin track is an awkward target on a wall. Values follow the usual
+ * lighting guidance - under 3000K to wind down, ~4500K neutral, and the
+ * bulb's cool limit to wake up. hue.py clamps each to what the room can
+ * physically produce. */
+static const struct { const char *name; int mirek; } CT_PRESET[] = {
+    { "Relax",    370 },   /* 2700K */
+    { "Daylight", 222 },   /* 4500K */
+    { "Energize", 153 },   /* 6500K */
+};
+#define N_CT_PRESET ((int)(sizeof CT_PRESET / sizeof CT_PRESET[0]))
+
+static lv_obj_t *pop_ct;
+static int       pop_ct_room = -1;
+/* LVGL sends CLICKED on release even when LONG_PRESSED already fired, so
+ * without this a long press would open the sheet and toggle the room. */
+static int       ct_long_pressed;
+
+static void ct_pop_hide(void)
+{
+    if (pop_ct) lv_obj_add_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
+    pop_ct_room = -1;
+}
+
+static void ct_preset_cb(lv_event_t *e)
+{
+    int p = (int)(intptr_t)lv_event_get_user_data(e);
+    int i = pop_ct_room;
+    if (i < 0 || i >= n_rooms || !rooms[i].reachable) { ct_pop_hide(); return; }
+    rooms[i].mirek = CT_PRESET[p].mirek;
+    /* Setting a white on a dark room is how you preview it. */
+    if (!rooms[i].on) rooms[i].on = 1;
+    if (rooms[i].bri == 0) rooms[i].bri = 60;
+    hue_send(i);
+    ct_pop_hide();
+    refresh_lights();
+    toast(CT_PRESET[p].name);
+}
+
+/* One row: icon and name on the left, brightness above warmth on the
+ * right. Both sliders are full-height children so a press on either never
+ * reaches the card underneath, which is what toggles the room. */
+#define ROW_SLD_X  400
+#define ROW_SLD_W  540
+#define ROW_VAL_X  980
+
 static void room_card_cb(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
@@ -1529,53 +1576,6 @@ static int mirek_kelvin(int mirek)
     return ((1000000 / mirek) + 25) / 50 * 50;
 }
 
-/* Three whites rather than a slider: a 347-step range is a lot of choice
- * for a thing people actually want in one of about three states, and a
- * thin track is an awkward target on a wall. Values follow the usual
- * lighting guidance - under 3000K to wind down, ~4500K neutral, and the
- * bulb's cool limit to wake up. hue.py clamps each to what the room can
- * physically produce. */
-static const struct { const char *name; int mirek; } CT_PRESET[] = {
-    { "Relax",    370 },   /* 2700K */
-    { "Daylight", 222 },   /* 4500K */
-    { "Energize", 153 },   /* 6500K */
-};
-#define N_CT_PRESET ((int)(sizeof CT_PRESET / sizeof CT_PRESET[0]))
-
-static lv_obj_t *pop_ct;
-static int       pop_ct_room = -1;
-/* LVGL sends CLICKED on release even when LONG_PRESSED already fired, so
- * without this a long press would open the sheet and toggle the room. */
-static int       ct_long_pressed;
-
-static void ct_pop_hide(void)
-{
-    if (pop_ct) lv_obj_add_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
-    pop_ct_room = -1;
-}
-
-static void ct_preset_cb(lv_event_t *e)
-{
-    int p = (int)(intptr_t)lv_event_get_user_data(e);
-    int i = pop_ct_room;
-    if (i < 0 || i >= n_rooms || !rooms[i].reachable) { ct_pop_hide(); return; }
-    rooms[i].mirek = CT_PRESET[p].mirek;
-    /* Setting a white on a dark room is how you preview it. */
-    if (!rooms[i].on) rooms[i].on = 1;
-    if (rooms[i].bri == 0) rooms[i].bri = 60;
-    hue_send(i);
-    ct_pop_hide();
-    refresh_lights();
-    toast(CT_PRESET[p].name);
-}
-
-/* One row: icon and name on the left, brightness above warmth on the
- * right. Both sliders are full-height children so a press on either never
- * reaches the card underneath, which is what toggles the room. */
-#define ROW_SLD_X  400
-#define ROW_SLD_W  540
-#define ROW_VAL_X  980
-
 static void build_lights(lv_obj_t *s)
 {
     for (int i = 0; i < MAX_ROOMS; i++) {
@@ -1616,7 +1616,7 @@ static void build_lights(lv_obj_t *s)
     }
 
     /* One sheet reused by every row; room_hold_cb moves it. */
-    pop_ct = box(s, 0, 0, N_CT_PRESET * 150 + 20, 116, C_SURF2, 20);
+    pop_ct = box(s, 0, 0, N_CT_PRESET * 150 + 20, 116, C_BORDER_ST, 20);
     lv_obj_add_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_border_width(pop_ct, 1, 0);
     lv_obj_set_style_border_color(pop_ct, lv_color_hex(C_BORDER), 0);
