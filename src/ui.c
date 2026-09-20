@@ -382,15 +382,22 @@ static const char *room_icon(const char *name)
     return LV_SYMBOL_CHARGE;
 }
 
-/* Hue reports colour temperature in mireks (153 cool .. 500 warm). Tint
- * the row with roughly that white so a warm room reads warm at a glance.
- * A straight lerp between the two ends is plenty for a tint; nobody is
- * colour-matching a wall panel. 0 means the room has no tunable bulbs. */
+/* Hue reports colour temperature in mireks (153 cool .. 500 warm). This
+ * paints the warmth slider itself, so the control shows the white it is
+ * about to set. A straight lerp between the two ends is plenty; nobody is
+ * colour-matching a wall panel.
+ *
+ * Deliberately NOT used to tint the rest of the row: a room with only
+ * fixed-white bulbs has no temperature to report, so tinting by it gave
+ * two lit rooms two different accent colours for no reason the person
+ * standing at the panel could see. */
+#define MIREK_MIN 153
+#define MIREK_MAX 500
 static uint32_t mirek_color(int mirek)
 {
-    if (mirek < 153) return C_WARN_TEXT;          /* including 0 = unknown */
-    if (mirek > 500) mirek = 500;
-    int t = (mirek - 153) * 255 / (500 - 153);    /* 0 cool .. 255 warm */
+    if (mirek < MIREK_MIN) mirek = MIREK_MIN;
+    if (mirek > MIREK_MAX) mirek = MIREK_MAX;
+    int t = (mirek - MIREK_MIN) * 255 / (MIREK_MAX - MIREK_MIN);
     int g = 244 - 97 * t / 255;
     int b = 255 - 214 * t / 255;
     return (uint32_t)((255 << 16) | (g << 8) | b);
@@ -433,7 +440,9 @@ static void hue_send(int idx)
 {
     FILE *f = fopen(env_or("CAT_HUE_CMD", "hue.cmd"), "a");
     if (!f) return;
-    fprintf(f, "set %d %d %d\n", idx, rooms[idx].on, rooms[idx].bri);
+    /* mirek 0 means "leave the temperature alone" - which is what a room
+     * of fixed-white bulbs always sends. */
+    fprintf(f, "set %d %d %d %d\n", idx, rooms[idx].on, rooms[idx].bri, rooms[idx].mirek);
     fclose(f);
 }
 
@@ -569,7 +578,9 @@ static time_t    rail_shown_at;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
-static struct { lv_obj_t *card, *ico, *name, *sw, *sld, *val; } room_row[MAX_ROOMS];
+static struct {
+    lv_obj_t *card, *ico, *name, *sld, *val, *sld_ct, *val_ct;
+} room_row[MAX_ROOMS];
 static lv_obj_t *lbl_hue_none;
 static int       laid_out_rooms = -1;   /* card geometry is sized to the count */
 static time_t    toast_until;
@@ -1415,16 +1426,11 @@ static void room_set_on(int i, int on)
     refresh_lights();
 }
 
-static void room_sw_cb(lv_event_t *e)
-{
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    room_set_on(i, lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
-}
-
-/* The whole row is the tap target: an 84px switch is a small thing to hit
- * standing at a wall panel. The slider and switch are children and LVGL
- * does not bubble events by default, so a press that lands on either of
- * them never reaches this. */
+/* The whole row is the tap target, which is why there is no on/off switch
+ * on it: an 84px toggle is a small thing to hit standing at a wall panel,
+ * and two ways to do the same thing on one row is one too many. The
+ * sliders are children and LVGL does not bubble events by default, so a
+ * press that lands on one never reaches this. */
 static void room_card_cb(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
@@ -1453,6 +1459,46 @@ static void room_sld_save_cb(lv_event_t *e)
     refresh_lights();
 }
 
+/* Kelvin is what the number on a bulb box says; mireks are the API's unit.
+ * Rounded to 50K because the slider is 347 steps wide and nobody adjusts a
+ * lamp to 2843K. */
+static int mirek_kelvin(int mirek)
+{
+    if (mirek < MIREK_MIN) mirek = MIREK_MIN;
+    return ((1000000 / mirek) + 25) / 50 * 50;
+}
+
+static void room_ct_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms) return;
+    rooms[i].mirek = lv_slider_get_value(lv_event_get_target(e));
+    lv_label_set_text_fmt(room_row[i].val_ct, "%dK", mirek_kelvin(rooms[i].mirek));
+    lv_obj_set_style_bg_color(room_row[i].sld_ct,
+                              lv_color_hex(mirek_color(rooms[i].mirek)), LV_PART_KNOB);
+}
+
+static void room_ct_save_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms || !rooms[i].reachable) return;
+    /* Setting a temperature on a dark room is how you preview it. */
+    if (!rooms[i].on) {
+        rooms[i].on = 1;
+        if (rooms[i].bri == 0) rooms[i].bri = 60;
+    }
+    hue_send(i);
+    refresh_lights();
+}
+
+/* One row: icon and name on the left, brightness above warmth on the
+ * right. Both sliders are full-height children so a press on either never
+ * reaches the card underneath, which is what toggles the room. */
+#define SLD_X   400
+#define SLD_W   540
+#define VAL_X   980
+#define SLD_DY  30      /* the two sliders sit this far either side of centre */
+
 static void build_lights(lv_obj_t *s)
 {
     for (int i = 0; i < MAX_ROOMS; i++) {
@@ -1471,8 +1517,8 @@ static void build_lights(lv_obj_t *s)
         lv_obj_align(room_row[i].name, LV_ALIGN_LEFT_MID, 80, 0);
 
         lv_obj_t *sl = lv_slider_create(c);
-        lv_obj_set_size(sl, 500, 12);
-        lv_obj_align(sl, LV_ALIGN_LEFT_MID, 400, 0);
+        lv_obj_set_size(sl, SLD_W, 12);
+        lv_obj_align(sl, LV_ALIGN_LEFT_MID, SLD_X, -SLD_DY);
         lv_obj_set_style_pad_all(sl, 8, LV_PART_KNOB);
         lv_slider_set_range(sl, 0, 100);
         lv_obj_add_event_cb(sl, room_sld_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
@@ -1482,14 +1528,23 @@ static void build_lights(lv_obj_t *s)
         room_row[i].sld = sl;
 
         room_row[i].val = text(c, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
-        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, 930, 0);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, VAL_X, -SLD_DY);
 
-        lv_obj_t *sw = lv_switch_create(c);
-        lv_obj_set_size(sw, 84, 44);
-        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -28, 0);
-        lv_obj_set_style_bg_color(sw, lv_color_hex(C_WARN_TEXT), LV_PART_INDICATOR | LV_STATE_CHECKED);
-        lv_obj_add_event_cb(sw, room_sw_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
-        room_row[i].sw = sw;
+        /* Warmth. The track is left at the neutral surface colour and only
+         * the knob carries the white being set - a full gradient is not
+         * something LVGL 8.3 draws without a custom draw hook. */
+        lv_obj_t *ct = lv_slider_create(c);
+        lv_obj_set_size(ct, SLD_W, 12);
+        lv_obj_align(ct, LV_ALIGN_LEFT_MID, SLD_X, SLD_DY);
+        lv_obj_set_style_pad_all(ct, 8, LV_PART_KNOB);
+        lv_slider_set_range(ct, MIREK_MIN, MIREK_MAX);
+        lv_obj_add_event_cb(ct, room_ct_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(ct, room_ct_save_cb, LV_EVENT_RELEASED, (void *)(intptr_t)i);
+        lv_obj_set_style_bg_color(ct, lv_color_hex(C_BORDER_ST), LV_PART_INDICATOR);
+        room_row[i].sld_ct = ct;
+
+        room_row[i].val_ct = text(c, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
+        lv_obj_align(room_row[i].val_ct, LV_ALIGN_LEFT_MID, VAL_X, SLD_DY);
     }
 
     /* Shown when hue.py is not writing: a wall panel that silently does
@@ -1531,48 +1586,64 @@ static void refresh_lights(void)
 
     for (int i = 0; i < n_rooms; i++) {
         int live = rooms[i].reachable;
-        /* Tint by the room's own colour temperature, but only while it is
-         * lit: a dark room glowing warm on the panel reads as switched on. */
-        uint32_t tint = (live && rooms[i].on) ? mirek_color(rooms[i].mirek) : C_MUTED;
+        int lit  = live && rooms[i].on;
+        /* One accent for every room, so two lit rooms never disagree about
+         * what "on" looks like. Colour belongs on the warmth slider, which
+         * is the only place it carries information. */
+        uint32_t accent = lit ? C_WARN_TEXT : C_MUTED;
+        int tunable = live && rooms[i].mirek > 0;
 
         lv_label_set_text(room_row[i].ico, room_icon(rooms[i].name));
-        lv_obj_set_style_text_color(room_row[i].ico, lv_color_hex(tint), 0);
+        lv_obj_set_style_text_color(room_row[i].ico, lv_color_hex(accent), 0);
         lv_label_set_text(room_row[i].name, rooms[i].name);
         lv_obj_set_style_text_color(room_row[i].name,
                                     lv_color_hex(live ? C_TEXT : C_MUTED), 0);
 
-        /* An unreachable bulb is not an off bulb, and showing "0%" beside a
-         * working switch invites taps that silently do nothing. */
+        /* Unreachable is not off. Showing "0%" next to live controls
+         * invites taps that silently do nothing. */
         if (!live) {
             lv_label_set_text(room_row[i].val, LV_SYMBOL_WARNING "  unreachable");
             lv_obj_set_style_text_color(room_row[i].val, lv_color_hex(C_MUTED), 0);
-            /* Sits where the slider was: at the 930 column it would run
-             * into the switch. */
-            lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, 400, 0);
+            lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, SLD_X, 0);
             lv_obj_add_flag(room_row[i].sld, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_state(room_row[i].sw, LV_STATE_DISABLED);
-            lv_obj_clear_state(room_row[i].sw, LV_STATE_CHECKED);
+            lv_obj_add_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(room_row[i].card, LV_OBJ_FLAG_CLICKABLE);
             continue;
         }
 
         lv_obj_clear_flag(room_row[i].sld, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_state(room_row[i].sw, LV_STATE_DISABLED);
         lv_obj_add_flag(room_row[i].card, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_text_color(room_row[i].val, lv_color_hex(C_TEXT2), 0);
-        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, 930, 0);
-        lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(tint), LV_PART_INDICATOR);
-        lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(tint), LV_PART_KNOB);
-        lv_obj_set_style_bg_color(room_row[i].sw, lv_color_hex(tint),
-                                  LV_PART_INDICATOR | LV_STATE_CHECKED);
+        lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(accent), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(accent), LV_PART_KNOB);
+
+        /* Fixed-white bulbs have no temperature to set, so the row centres
+         * its one slider rather than leaving a gap where a dead control
+         * would have been. */
+        int dy = tunable ? -SLD_DY : 0;
+        lv_obj_align(room_row[i].sld, LV_ALIGN_LEFT_MID, SLD_X, dy);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, VAL_X, dy);
+        if (tunable) {
+            lv_obj_clear_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_bg_color(room_row[i].sld_ct,
+                                      lv_color_hex(lit ? mirek_color(rooms[i].mirek) : C_MUTED),
+                                      LV_PART_KNOB);
+            if (!lv_obj_has_state(room_row[i].sld_ct, LV_STATE_PRESSED)) {
+                lv_slider_set_value(room_row[i].sld_ct, rooms[i].mirek, LV_ANIM_OFF);
+                lv_label_set_text_fmt(room_row[i].val_ct, "%dK", mirek_kelvin(rooms[i].mirek));
+            }
+        } else {
+            lv_obj_add_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
+        }
 
         /* Do not yank the knob out from under a finger mid-drag. */
         if (!lv_obj_has_state(room_row[i].sld, LV_STATE_PRESSED)) {
             lv_slider_set_value(room_row[i].sld, rooms[i].bri, LV_ANIM_OFF);
             lv_label_set_text_fmt(room_row[i].val, "%d%%", rooms[i].bri);
         }
-        if (rooms[i].on) lv_obj_add_state(room_row[i].sw, LV_STATE_CHECKED);
-        else             lv_obj_clear_state(room_row[i].sw, LV_STATE_CHECKED);
     }
 }
 

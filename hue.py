@@ -142,12 +142,17 @@ def write_state(rs):
 
 
 def apply(rs, line):
-    """'set <idx> <on> <bri>' - absolute, because the UI already knows the state."""
+    """'set <idx> <on> <bri> [mirek]' - absolute: the UI knows the state.
+
+    mirek 0, or a room with no tunable-white bulbs, leaves the temperature
+    alone - the bridge rejects color_temperature on a fixed-white group.
+    """
     p = line.split()
-    if len(p) != 4 or p[0] != 'set':
+    if len(p) not in (4, 5) or p[0] != 'set':
         return
     try:
         idx, on, bri = int(p[1]), int(p[2]), int(p[3])
+        mirek = int(p[4]) if len(p) == 5 else 0
     except ValueError:
         return
     if not 0 <= idx < len(rs):
@@ -157,7 +162,18 @@ def apply(rs, line):
     # bridge rejects it outright on some firmwares.
     if on and bri > 0:
         body['dimming'] = {'brightness': max(1, min(100, bri))}
+    if on and mirek and rs[idx]['mirek']:
+        mirek = max(153, min(500, mirek))
+        body['color_temperature'] = {'mirek': mirek}
+    else:
+        mirek = 0
     api('grouped_light/%s' % rs[idx]['gid'], 'PUT', body)
+    # A grouped_light reports color_temperature as an empty object, so the
+    # 2s poll cannot read the temperature back - only the 30s structure
+    # pass can. Without this the UI would snap the warmth slider back to
+    # the old value a second after the finger left it.
+    if mirek:
+        rs[idx]['mirek'] = mirek
 
 
 def main():
