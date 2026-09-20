@@ -1530,7 +1530,7 @@ static void room_set_on(int i, int on)
  * bulb's cool limit to wake up. hue.py clamps each to what the room can
  * physically produce. */
 static const struct { const char *name; int mirek, kelvin; } CT_PRESET[] = {
-    { "Relax",    370, 2700 },
+    { "Relax",    312, 3200 },
     { "Daylight", 222, 4500 },
     { "Energize", 153, 6500 },
 };
