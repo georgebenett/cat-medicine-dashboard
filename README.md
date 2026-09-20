@@ -20,6 +20,8 @@ straight to the framebuffer - no X, no Wayland, no browser.
 |---|---|
 | ![Calendar](docs/calendar.png) | ![Settings](docs/settings.png) |
 
+![Lights](docs/lights.png)
+
 - **Today** - the photo, whether today is a medicine day, the dose count
   for the week, a Mon..Sun strip, and buttons to log a dose or an event.
   Once a dose is logged the button becomes *Undo today's dose*: that is
@@ -29,6 +31,9 @@ straight to the framebuffer - no X, no Wayland, no browser.
   with month/streak/vomiting stats and a recent list. Food is logged and
   listed but deliberately not marked on the grid: it happens most days and
   would colour in every cell.
+- **Lights** - one row per Philips Hue room: a toggle, a brightness slider
+  and the current level. It follows the bridge, so a lamp switched from a
+  phone or a wall switch shows up here within a second.
 - **Settings** - backlight, night dim, which weekdays are medicine days, a
   reminder toggle, and buttons to export or reset the log.
 
@@ -104,7 +109,24 @@ echo 'transit_key=YOUR_KEY' >> cat_cfg.txt
 
 then add `transit_from=` and `transit_to=` with those ids.
 
-**6. Off-device backup** (recommended). `cat_log.csv` is the only
+**6. Lights** (optional). Needs a Philips Hue Bridge on the same network.
+No cloud account and no internet: the bridge's own CLIP v2 API is local.
+Google's Home APIs ship as Android and iOS SDKs only, so a headless Pi
+cannot use them anyway - and routing a switch through two clouds to reach
+a bridge in the next room would be worse if it could.
+
+```sh
+echo 'hue_bridge=192.168.1.20' >> cat_cfg.txt   # curl https://discovery.meethue.com
+./hue.py --pair                                 # press the round button first
+echo 'hue_key=THE_KEY_IT_PRINTS' >> cat_cfg.txt
+./hue.py --once                                 # should list your rooms
+```
+
+Rooms come from the bridge, so they are named and grouped wherever you
+already set them up in the Hue app. Any Zigbee bulb paired to the bridge
+works, Philips-branded or not.
+
+**7. Off-device backup** (recommended). `cat_log.csv` is the only
 irreplaceable thing here and it lives on an SD card. `backup.sh` copies it
 into a clone of a private repo and pushes hourly:
 
@@ -148,6 +170,8 @@ transit_to=
 transit_lead=8         minutes you need to reach the stop
 transit_start=08:00    departure board window
 transit_end=09:30
+hue_bridge=            Hue bridge IP - not in the UI
+hue_key=               bridge application key, from ./hue.py --pair
 ```
 
 `cat_log.csv` is the record, one event per line, append-only:
@@ -216,6 +240,13 @@ network takes - and this Pi's network is the least reliable part of it.
 | `cat-backup` | hourly | pushes `cat_log.csv` |
 | `cat-wifi` | 2 min | bounces a wedged link |
 | `cat-dim` | at boot | holds the panel dark |
+| `cat-hue` | daemon, 2s | `hue.txt`, reads `hue.cmd` |
+
+`cat-hue` is the one daemon rather than a timer: a light switch that reacts
+in five minutes is not a light switch. It is the same file hand-off in both
+directions - the UI writes a line to `hue.cmd` and moves its own toggle
+immediately, and the next poll confirms it from the bridge. The press feels
+instant without a single network call inside the UI.
 
 Stale data is handled rather than hidden: weather older than three hours is
 greyed out, and a departure board older than 15 minutes is replaced by the
@@ -304,7 +335,7 @@ Debug knobs, no rebuild needed:
 
 | Variable | Effect |
 |---|---|
-| `CAT_SCREEN=0\|1\|2` | open on Today / Calendar / Settings |
+| `CAT_SCREEN=0\|1\|2\|3` | open on Today / Calendar / Lights / Settings |
 | `CAT_POPUP=1` | open the Log event sheet |
 | `CAT_TOAST="text"` | pin a toast up |
 | `TOUCH_DEBUG=1` | touch coordinates to stderr |
