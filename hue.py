@@ -28,7 +28,9 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 POLL = 2.0          # on/off + brightness; the bridge is on the LAN, this is cheap
 STRUCT_EVERY = 30.0 # rooms, bulb membership, mesh health - all near-static
-AUTO_EVERY = 60.0   # the daylight curve; it moves far slower than a minute
+AUTO_EVERY = 10.0   # the curve crawls, but the panel's "why" label should not
+                    # lag a minute behind reality; the diff guard in auto_run
+                    # keeps this from turning into bridge traffic
 CMD_POLL = 0.2      # how fast a press reaches the bulb
 
 def cfg(key, default=None):
@@ -437,9 +439,9 @@ def main():
         print(write_state(read_state(structure())).strip())
         return 0
 
-    rs, last_poll, last_struct, last_auto = [], 0.0, 0.0, 0.0
+    rs, last_poll, last_struct, last_auto, last_cfg = [], 0.0, 0.0, 0.0, 0.0
     a = auto_cfg()
-    auto_state = {'inside': False, 'resume': None}
+    auto_state = {'inside': False, 'resume': None, 'was_on': bool(a['on'])}
     while True:
         now = time.monotonic()
 
@@ -447,7 +449,6 @@ def main():
             # Set the timer even on failure, or a bridge that is down turns
             # this loop into a retry storm.
             last_struct = now
-            a = auto_cfg()          # so cat_cfg.txt edits land without a restart
             try:
                 rs = structure()
                 last_poll = 0.0
@@ -491,7 +492,26 @@ def main():
                     print("auto: manual override, resuming %s" % nxt.strftime('%H:%M %d %b'),
                           flush=True)
 
-        if rs and a['on'] and now - last_auto >= AUTO_EVERY:
+        # The panel's automation button writes cat_cfg.txt, and half a
+        # minute of nothing happening after pressing it reads as broken.
+        # Re-reading a sub-kilobyte file every couple of seconds is cheaper
+        # than the confusion.
+        if now - last_cfg >= 2.0:
+            last_cfg = now
+            a = auto_cfg()
+            if a['on'] and not auto_state['was_on']:
+                # Switching the automation back on is an explicit request to
+                # take the room over, so it outranks an earlier manual
+                # override - otherwise the button looks dead until tomorrow.
+                if auto_state['resume']:
+                    print("auto: re-armed, dropping the manual override", flush=True)
+                auto_state['resume'] = None
+                last_auto = 0.0          # act now, not at the next minute
+            auto_state['was_on'] = bool(a['on'])
+
+        # Called even when disabled, so hue.txt stops claiming the curve is
+        # running after it has been switched off.
+        if rs and now - last_auto >= AUTO_EVERY:
             last_auto = now
             try:
                 auto_run(rs, a, auto_state)
