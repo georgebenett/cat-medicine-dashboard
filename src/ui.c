@@ -1494,10 +1494,10 @@ static void room_ct_save_cb(lv_event_t *e)
 /* One row: icon and name on the left, brightness above warmth on the
  * right. Both sliders are full-height children so a press on either never
  * reaches the card underneath, which is what toggles the room. */
-#define SLD_X   400
-#define SLD_W   540
-#define VAL_X   980
-#define SLD_DY  30      /* the two sliders sit this far either side of centre */
+#define ROW_SLD_X  400
+#define ROW_SLD_W  540
+#define ROW_VAL_X  980
+#define ROW_SLD_DY 30      /* the two sliders sit this far either side of centre */
 
 static void build_lights(lv_obj_t *s)
 {
@@ -1517,8 +1517,8 @@ static void build_lights(lv_obj_t *s)
         lv_obj_align(room_row[i].name, LV_ALIGN_LEFT_MID, 80, 0);
 
         lv_obj_t *sl = lv_slider_create(c);
-        lv_obj_set_size(sl, SLD_W, 12);
-        lv_obj_align(sl, LV_ALIGN_LEFT_MID, SLD_X, -SLD_DY);
+        lv_obj_set_size(sl, ROW_SLD_W, 12);
+        lv_obj_align(sl, LV_ALIGN_LEFT_MID, ROW_SLD_X, -ROW_SLD_DY);
         lv_obj_set_style_pad_all(sl, 8, LV_PART_KNOB);
         lv_slider_set_range(sl, 0, 100);
         lv_obj_add_event_cb(sl, room_sld_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
@@ -1528,14 +1528,14 @@ static void build_lights(lv_obj_t *s)
         room_row[i].sld = sl;
 
         room_row[i].val = text(c, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
-        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, VAL_X, -SLD_DY);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_VAL_X, -ROW_SLD_DY);
 
         /* Warmth. The track is left at the neutral surface colour and only
          * the knob carries the white being set - a full gradient is not
          * something LVGL 8.3 draws without a custom draw hook. */
         lv_obj_t *ct = lv_slider_create(c);
-        lv_obj_set_size(ct, SLD_W, 12);
-        lv_obj_align(ct, LV_ALIGN_LEFT_MID, SLD_X, SLD_DY);
+        lv_obj_set_size(ct, ROW_SLD_W, 12);
+        lv_obj_align(ct, LV_ALIGN_LEFT_MID, ROW_SLD_X, ROW_SLD_DY);
         lv_obj_set_style_pad_all(ct, 8, LV_PART_KNOB);
         lv_slider_set_range(ct, MIREK_MIN, MIREK_MAX);
         lv_obj_add_event_cb(ct, room_ct_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
@@ -1544,7 +1544,7 @@ static void build_lights(lv_obj_t *s)
         room_row[i].sld_ct = ct;
 
         room_row[i].val_ct = text(c, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
-        lv_obj_align(room_row[i].val_ct, LV_ALIGN_LEFT_MID, VAL_X, SLD_DY);
+        lv_obj_align(room_row[i].val_ct, LV_ALIGN_LEFT_MID, ROW_VAL_X, ROW_SLD_DY);
     }
 
     /* Shown when hue.py is not writing: a wall panel that silently does
@@ -1604,7 +1604,7 @@ static void refresh_lights(void)
         if (!live) {
             lv_label_set_text(room_row[i].val, LV_SYMBOL_WARNING "  unreachable");
             lv_obj_set_style_text_color(room_row[i].val, lv_color_hex(C_MUTED), 0);
-            lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, SLD_X, 0);
+            lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_SLD_X, 0);
             lv_obj_add_flag(room_row[i].sld, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
@@ -1621,9 +1621,9 @@ static void refresh_lights(void)
         /* Fixed-white bulbs have no temperature to set, so the row centres
          * its one slider rather than leaving a gap where a dead control
          * would have been. */
-        int dy = tunable ? -SLD_DY : 0;
-        lv_obj_align(room_row[i].sld, LV_ALIGN_LEFT_MID, SLD_X, dy);
-        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, VAL_X, dy);
+        int dy = tunable ? -ROW_SLD_DY : 0;
+        lv_obj_align(room_row[i].sld, LV_ALIGN_LEFT_MID, ROW_SLD_X, dy);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_VAL_X, dy);
         if (tunable) {
             lv_obj_clear_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
