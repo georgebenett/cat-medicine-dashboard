@@ -95,6 +95,7 @@ def structure():
         if not gid:
             continue
         mireks, reach = [], False
+        lo, hi = 153, 500
         for c in r['children']:
             dev = devices.get(c['rid'])
             if not dev:
@@ -107,13 +108,23 @@ def structure():
             for s in dev['services']:
                 if s['rtype'] != 'light':
                     continue
-                m = ((lights.get(s['rid']) or {}).get('color_temperature') or {}).get('mirek')
-                if m:
-                    mireks.append(m)
+                ct = (lights.get(s['rid']) or {}).get('color_temperature') or {}
+                if ct.get('mirek'):
+                    mireks.append(ct['mirek'])
+                # Bulbs disagree about how cool they go - the ambiance spots
+                # stop at 454 (2200K), not the 500 the API allows. Keep the
+                # narrowest range so a preset never asks for a white the
+                # room cannot make.
+                sch = ct.get('mirek_schema') or {}
+                if sch.get('mirek_minimum'):
+                    lo = max(lo, sch['mirek_minimum'])
+                if sch.get('mirek_maximum'):
+                    hi = min(hi, sch['mirek_maximum'])
         out.append({'gid': gid, 'name': r['metadata']['name'],
                     'reachable': 1 if reach else 0,
                     # 0 means the room has no tunable-white bulbs at all.
                     'mirek': int(sum(mireks) / len(mireks)) if mireks else 0,
+                    'lo': lo, 'hi': hi,
                     'on': 0, 'bri': 0})
     out.sort(key=lambda x: x['name'].lower())
     return out
@@ -163,7 +174,7 @@ def apply(rs, line):
     if on and bri > 0:
         body['dimming'] = {'brightness': max(1, min(100, bri))}
     if on and mirek and rs[idx]['mirek']:
-        mirek = max(153, min(500, mirek))
+        mirek = max(rs[idx]['lo'], min(rs[idx]['hi'], mirek))
         body['color_temperature'] = {'mirek': mirek}
     else:
         mirek = 0

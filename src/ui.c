@@ -403,8 +403,26 @@ static uint32_t mirek_color(int mirek)
     return (uint32_t)((255 << 16) | (g << 8) | b);
 }
 
+/* A value we just sent is not in hue.txt yet: the daemon has to reach the
+ * bridge and poll it back, which takes a moment. Reloading blindly in that
+ * window puts the old value back and the knob springs backwards under the
+ * finger that just moved it. Hold ours until the file agrees or the wait
+ * runs out - whichever comes first, so a bridge that never applies the
+ * command still converges on the truth. */
+#define HUE_PENDING_SECS 4
+static time_t room_pending[MAX_ROOMS];
+
 static void hue_load(void)
 {
+    struct { int on, bri, mirek; } keep[MAX_ROOMS];
+    int  n_keep = n_rooms;
+    time_t now = time(NULL);
+    for (int i = 0; i < n_keep; i++) {
+        keep[i].on = rooms[i].on;
+        keep[i].bri = rooms[i].bri;
+        keep[i].mirek = rooms[i].mirek;
+    }
+
     FILE *f = fopen(env_or("CAT_HUE", "hue.txt"), "r");
     n_rooms = 0;
     hue_updated = 0;
@@ -432,6 +450,21 @@ static void hue_load(void)
         if (field >= 3) n_rooms++;
     }
     fclose(f);
+
+    for (int i = 0; i < n_rooms && i < n_keep; i++) {
+        if (!room_pending[i]) continue;
+        /* The file caught up, or we waited long enough. Either way stop
+         * second-guessing it. */
+        if (now >= room_pending[i] ||
+            (rooms[i].on == keep[i].on && rooms[i].bri == keep[i].bri &&
+             rooms[i].mirek == keep[i].mirek)) {
+            room_pending[i] = 0;
+            continue;
+        }
+        rooms[i].on = keep[i].on;
+        rooms[i].bri = keep[i].bri;
+        rooms[i].mirek = keep[i].mirek;
+    }
 }
 
 /* The bridge is on the LAN, but the round trip still runs through a file
@@ -444,6 +477,7 @@ static void hue_send(int idx)
      * of fixed-white bulbs always sends. */
     fprintf(f, "set %d %d %d %d\n", idx, rooms[idx].on, rooms[idx].bri, rooms[idx].mirek);
     fclose(f);
+    room_pending[idx] = time(NULL) + HUE_PENDING_SECS;
 }
 
 static int hue_ok(void) { return hue_updated && (long)time(NULL) - hue_updated < 30; }
@@ -579,7 +613,7 @@ static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
 static struct {
-    lv_obj_t *card, *ico, *name, *sld, *val, *sld_ct, *val_ct;
+    lv_obj_t *card, *ico, *name, *sld, *val, *val_ct;
 } room_row[MAX_ROOMS];
 static lv_obj_t *lbl_hue_none;
 static int       laid_out_rooms = -1;   /* card geometry is sized to the count */
@@ -1435,7 +1469,34 @@ static void room_card_cb(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     if (i >= n_rooms) return;
+    if (ct_long_pressed) { ct_long_pressed = 0; return; }   /* the sheet took it */
+    if (pop_ct_room >= 0) { ct_pop_hide(); return; }        /* tap away = dismiss */
     room_set_on(i, !rooms[i].on);
+}
+
+/* Hold a room to pick its white. Rooms with fixed-white bulbs have nothing
+ * to offer, so they just toggle. */
+static void room_hold_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms || !rooms[i].reachable || rooms[i].mirek <= 0) return;
+    ct_long_pressed = 1;
+    pop_ct_room = i;
+
+    /* Sits on the row it belongs to, so there is no doubt which room is
+     * about to change. */
+    lv_obj_t *card = room_row[i].card;
+    lv_obj_clear_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align_to(pop_ct, card, LV_ALIGN_RIGHT_MID, -20, 0);
+    lv_obj_move_foreground(pop_ct);
+
+    for (int p = 0; p < N_CT_PRESET; p++) {
+        lv_obj_t *b = lv_obj_get_child(pop_ct, p);
+        /* Ring the one already set, within half a preset step. */
+        int sel = abs(rooms[i].mirek - CT_PRESET[p].mirek) < 30;
+        lv_obj_set_style_border_width(b, sel ? 3 : 0, 0);
+        lv_obj_set_style_border_color(b, lv_color_hex(C_TEXT), 0);
+    }
 }
 
 /* Dragging fires this per pixel. Writing a command each time would queue
@@ -1468,27 +1529,44 @@ static int mirek_kelvin(int mirek)
     return ((1000000 / mirek) + 25) / 50 * 50;
 }
 
-static void room_ct_cb(lv_event_t *e)
+/* Three whites rather than a slider: a 347-step range is a lot of choice
+ * for a thing people actually want in one of about three states, and a
+ * thin track is an awkward target on a wall. Values follow the usual
+ * lighting guidance - under 3000K to wind down, ~4500K neutral, and the
+ * bulb's cool limit to wake up. hue.py clamps each to what the room can
+ * physically produce. */
+static const struct { const char *name; int mirek; } CT_PRESET[] = {
+    { "Relax",    370 },   /* 2700K */
+    { "Daylight", 222 },   /* 4500K */
+    { "Energize", 153 },   /* 6500K */
+};
+#define N_CT_PRESET ((int)(sizeof CT_PRESET / sizeof CT_PRESET[0]))
+
+static lv_obj_t *pop_ct;
+static int       pop_ct_room = -1;
+/* LVGL sends CLICKED on release even when LONG_PRESSED already fired, so
+ * without this a long press would open the sheet and toggle the room. */
+static int       ct_long_pressed;
+
+static void ct_pop_hide(void)
 {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i >= n_rooms) return;
-    rooms[i].mirek = lv_slider_get_value(lv_event_get_target(e));
-    lv_label_set_text_fmt(room_row[i].val_ct, "%dK", mirek_kelvin(rooms[i].mirek));
-    lv_obj_set_style_bg_color(room_row[i].sld_ct,
-                              lv_color_hex(mirek_color(rooms[i].mirek)), LV_PART_KNOB);
+    if (pop_ct) lv_obj_add_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
+    pop_ct_room = -1;
 }
 
-static void room_ct_save_cb(lv_event_t *e)
+static void ct_preset_cb(lv_event_t *e)
 {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i >= n_rooms || !rooms[i].reachable) return;
-    /* Setting a temperature on a dark room is how you preview it. */
-    if (!rooms[i].on) {
-        rooms[i].on = 1;
-        if (rooms[i].bri == 0) rooms[i].bri = 60;
-    }
+    int p = (int)(intptr_t)lv_event_get_user_data(e);
+    int i = pop_ct_room;
+    if (i < 0 || i >= n_rooms || !rooms[i].reachable) { ct_pop_hide(); return; }
+    rooms[i].mirek = CT_PRESET[p].mirek;
+    /* Setting a white on a dark room is how you preview it. */
+    if (!rooms[i].on) rooms[i].on = 1;
+    if (rooms[i].bri == 0) rooms[i].bri = 60;
     hue_send(i);
+    ct_pop_hide();
     refresh_lights();
+    toast(CT_PRESET[p].name);
 }
 
 /* One row: icon and name on the left, brightness above warmth on the
@@ -1497,7 +1575,6 @@ static void room_ct_save_cb(lv_event_t *e)
 #define ROW_SLD_X  400
 #define ROW_SLD_W  540
 #define ROW_VAL_X  980
-#define ROW_SLD_DY 30      /* the two sliders sit this far either side of centre */
 
 static void build_lights(lv_obj_t *s)
 {
@@ -1518,7 +1595,7 @@ static void build_lights(lv_obj_t *s)
 
         lv_obj_t *sl = lv_slider_create(c);
         lv_obj_set_size(sl, ROW_SLD_W, 12);
-        lv_obj_align(sl, LV_ALIGN_LEFT_MID, ROW_SLD_X, -ROW_SLD_DY);
+        lv_obj_align(sl, LV_ALIGN_LEFT_MID, ROW_SLD_X, 0);
         lv_obj_set_style_pad_all(sl, 8, LV_PART_KNOB);
         lv_slider_set_range(sl, 0, 100);
         lv_obj_add_event_cb(sl, room_sld_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
@@ -1528,26 +1605,39 @@ static void build_lights(lv_obj_t *s)
         room_row[i].sld = sl;
 
         room_row[i].val = text(c, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
-        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_VAL_X, -ROW_SLD_DY);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_VAL_X, 0);
 
-        /* Warmth. The track is left at the neutral surface colour and only
-         * the knob carries the white being set - a full gradient is not
-         * something LVGL 8.3 draws without a custom draw hook. */
-        lv_obj_t *ct = lv_slider_create(c);
-        lv_obj_set_size(ct, ROW_SLD_W, 12);
-        lv_obj_align(ct, LV_ALIGN_LEFT_MID, ROW_SLD_X, ROW_SLD_DY);
-        lv_obj_set_style_pad_all(ct, 8, LV_PART_KNOB);
-        lv_slider_set_range(ct, MIREK_MIN, MIREK_MAX);
-        lv_obj_add_event_cb(ct, room_ct_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
-        lv_obj_add_event_cb(ct, room_ct_save_cb, LV_EVENT_RELEASED, (void *)(intptr_t)i);
-        /* No fill: warmth is a position on a scale, not an amount of
-         * something, so a filled-to-here bar would be reading the control
-         * as a second brightness. The knob alone carries the value. */
-        lv_obj_set_style_bg_opa(ct, LV_OPA_0, LV_PART_INDICATOR);
-        room_row[i].sld_ct = ct;
-
+        /* Hint that the row has more behind a hold. Only shown on rooms
+         * that can actually change white - see refresh_lights. */
         room_row[i].val_ct = text(c, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
-        lv_obj_align(room_row[i].val_ct, LV_ALIGN_LEFT_MID, ROW_VAL_X, ROW_SLD_DY);
+        lv_obj_align(room_row[i].val_ct, LV_ALIGN_LEFT_MID, 80, 18);
+
+        lv_obj_add_event_cb(c, room_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)i);
+    }
+
+    /* One sheet reused by every row; room_hold_cb moves it. */
+    pop_ct = box(s, 0, 0, N_CT_PRESET * 150 + 20, 116, C_SURF2, 20);
+    lv_obj_add_flag(pop_ct, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_border_width(pop_ct, 1, 0);
+    lv_obj_set_style_border_color(pop_ct, lv_color_hex(C_BORDER), 0);
+    for (int p = 0; p < N_CT_PRESET; p++) {
+        lv_obj_t *b = flat_btn(pop_ct);
+        lv_obj_set_size(b, 138, 92);
+        lv_obj_set_pos(b, 10 + p * 150, 12);
+        lv_obj_set_style_radius(b, 16, 0);
+        /* Each swatch is painted the white it sets, so the choice is
+         * visible rather than a word you have to translate to a colour. */
+        lv_obj_set_style_bg_color(b, lv_color_hex(mirek_color(CT_PRESET[p].mirek)), 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+        lv_obj_add_event_cb(b, ct_preset_cb, LV_EVENT_CLICKED, (void *)(intptr_t)p);
+        lv_obj_t *l = text(b, 0, 0, CT_PRESET[p].name, &lv_font_montserrat_20, C_BG);
+        lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 16);
+        lv_obj_t *k = lv_label_create(b);
+        lv_label_set_text_fmt(k, "%dK", mirek_kelvin(CT_PRESET[p].mirek));
+        lv_obj_set_style_text_font(k, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(k, lv_color_hex(C_BG), 0);
+        lv_obj_set_style_text_opa(k, LV_OPA_60, 0);
+        lv_obj_align(k, LV_ALIGN_BOTTOM_MID, 0, -16);
     }
 
     /* Shown when hue.py is not writing: a wall panel that silently does
@@ -1609,7 +1699,6 @@ static void refresh_lights(void)
             lv_obj_set_style_text_color(room_row[i].val, lv_color_hex(C_MUTED), 0);
             lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_SLD_X, 0);
             lv_obj_add_flag(room_row[i].sld, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(room_row[i].card, LV_OBJ_FLAG_CLICKABLE);
             continue;
@@ -1621,25 +1710,19 @@ static void refresh_lights(void)
         lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(accent), LV_PART_INDICATOR);
         lv_obj_set_style_bg_color(room_row[i].sld, lv_color_hex(accent), LV_PART_KNOB);
 
-        /* Fixed-white bulbs have no temperature to set, so the row centres
-         * its one slider rather than leaving a gap where a dead control
-         * would have been. */
-        int dy = tunable ? -ROW_SLD_DY : 0;
-        lv_obj_align(room_row[i].sld, LV_ALIGN_LEFT_MID, ROW_SLD_X, dy);
-        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_VAL_X, dy);
+        lv_obj_align(room_row[i].sld, LV_ALIGN_LEFT_MID, ROW_SLD_X, 0);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, ROW_VAL_X, 0);
+
+        /* Tunable rooms say what white they are on and that a hold changes
+         * it; nothing else advertises the gesture. */
         if (tunable) {
-            lv_obj_clear_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(room_row[i].val_ct, "%dK  -  hold to change",
+                                  mirek_kelvin(rooms[i].mirek));
             lv_obj_clear_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_style_bg_color(room_row[i].sld_ct,
-                                      lv_color_hex(lit ? mirek_color(rooms[i].mirek) : C_MUTED),
-                                      LV_PART_KNOB);
-            if (!lv_obj_has_state(room_row[i].sld_ct, LV_STATE_PRESSED)) {
-                lv_slider_set_value(room_row[i].sld_ct, rooms[i].mirek, LV_ANIM_OFF);
-                lv_label_set_text_fmt(room_row[i].val_ct, "%dK", mirek_kelvin(rooms[i].mirek));
-            }
+            lv_obj_align(room_row[i].name, LV_ALIGN_LEFT_MID, 80, -16);
         } else {
-            lv_obj_add_flag(room_row[i].sld_ct, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(room_row[i].val_ct, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_align(room_row[i].name, LV_ALIGN_LEFT_MID, 80, 0);
         }
 
         /* Do not yank the knob out from under a finger mid-drag. */
