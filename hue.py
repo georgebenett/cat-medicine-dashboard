@@ -191,8 +191,10 @@ def auto_cfg():
         'night': int(cfg('hue_auto_night', '35')),
         'ramp':  int(cfg('hue_auto_ramp', '30')),
         'cool':  int(cfg('hue_auto_cool', '200')),    # 5000K, window opens
-        'warm':  int(cfg('hue_auto_warm', '370')),    # 2700K, at sunset
-        'late':  int(cfg('hue_auto_late', '454')),    # 2200K, window closes
+        'warm':  int(cfg('hue_auto_warm', '312')),    # 3200K, at sunset
+        'late':  int(cfg('hue_auto_late', '312')),    # 3200K, window closes -
+                                                      # the evening holds, it does
+                                                      # not keep sliding to candle
         # Hours of daylight above which the room lights itself through the
         # window and this is just burning power. 16h skips roughly May to
         # early August in Malmo; 0 disables the opt-out.
@@ -380,7 +382,7 @@ def selftest():
     """Curve checks against real Malmo solar times."""
     a = auto_cfg()
     a.update({'on': 1, 'from': 7 * 60, 'to': 22 * 60, 'day': 80, 'peak': 100,
-              'night': 35, 'ramp': 30, 'cool': 200, 'warm': 370, 'late': 454,
+              'night': 35, 'ramp': 30, 'cool': 200, 'warm': 312, 'late': 312,
               'skip': 16})
 
     win_r, win_s = 9 * 60 + 34, 16 * 60 + 37     # 21 Dec
@@ -428,11 +430,16 @@ def selftest():
 
     # Sunset is the warm anchor, whenever it happens to fall.
     for r, s in ((win_r, win_s), (eq_r, eq_s)):
-        assert abs(auto_target(s, r, s, a)[1] - 370) <= 1, (s, auto_target(s, r, s, a))
+        assert abs(auto_target(s, r, s, a)[1] - 312) <= 1, (s, auto_target(s, r, s, a))
 
     # Closing: dimmest and warmest of the day.
     bri, mirek = auto_target(21 * 60 + 59, eq_r, eq_s, a)
-    assert 35 <= bri <= 36 and 450 <= mirek <= 454, (bri, mirek)
+    assert 35 <= bri <= 36 and mirek == 312, (bri, mirek)
+
+    # Nothing in the day is allowed warmer than 3200K - the whole point of
+    # pinning warm and late to the same anchor.
+    for r, s in ((win_r, win_s), (eq_r, eq_s)):
+        assert max(auto_target(m, r, s, a)[1] for m in range(7 * 60, 22 * 60)) <= 312
 
     # Monotonic warming across the whole window - no going cold again.
     prev = 0

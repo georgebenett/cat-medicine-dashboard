@@ -1532,7 +1532,7 @@ static void room_set_on(int i, int on)
 static const struct { const char *name; int mirek, kelvin; } CT_PRESET[] = {
     { "Relax",    312, 3200 },
     { "Daylight", 222, 4500 },
-    { "Energize", 153, 6500 },
+    { "Energize", 182, 5500 },
 };
 #define N_CT_PRESET ((int)(sizeof CT_PRESET / sizeof CT_PRESET[0]))
 /* Two stacked lines of montserrat_20 (25px), laid out explicitly. */

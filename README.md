@@ -33,8 +33,8 @@ straight to the framebuffer - no X, no Wayland, no browser.
   would colour in every cell.
 - **Lights** - one row per Philips Hue room. Tap anywhere on the row to
   toggle it, drag the slider to dim, and **hold** a row with tunable-white
-  bulbs to pick between three whites - Relax 2700K, Daylight 4500K and
-  Energize 6500K, each swatch painted the colour it sets. Three presets
+  bulbs to pick between three whites - Relax 3200K, Daylight 4500K and
+  Energize 5500K, each swatch painted the colour it sets. Three presets
   rather than a slider: a 347-step range is a lot of choice for something
   people want in about three states. There is no on/off switch on purpose,
   the row itself is the target - far easier to hit standing at a wall
@@ -189,8 +189,9 @@ hue_auto_day=80        brightness once the ramp is done
 hue_auto_peak=100      brightness at sunset - the darkest useful hour
 hue_auto_night=35      brightness as the window closes
 hue_auto_cool=200      mirek at the window opening (5000K)
-hue_auto_warm=370      mirek at sunset (2700K)
-hue_auto_late=454      mirek at the window closing (2200K)
+hue_auto_warm=312      mirek at sunset (3200K)
+hue_auto_late=312      mirek at the window closing - same as warm,
+                       so the evening holds rather than sliding to candle
 hue_auto_skip_daylen=16  hours of daylight above which it sits the day out
 ```
 
