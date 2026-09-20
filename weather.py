@@ -29,7 +29,10 @@ url = ("https://api.open-meteo.com/v1/forecast"
        f"?latitude={lat}&longitude={lon}"
        "&current=temperature_2m,weather_code"
        "&hourly=precipitation_probability"
-       "&daily=temperature_2m_max,temperature_2m_min"
+       # sunrise/sunset ride along for hue.py's daylight automation: same
+       # call, same coordinates, no second API and no almanac table to go
+       # stale. Malmo runs from 7h of daylight in December to 17h30 in June.
+       "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset"
        "&timezone=auto&forecast_days=1")
 
 try:
@@ -56,10 +59,18 @@ try:
         if p >= thresh and rain_from < 0:
             rain_from = h
 
-    out = ("temp=%.0f\ncode=%d\nhi=%.0f\nlo=%.0f\nrain_from=%d\nrain_max=%d\nupdated=%d\n" % (
+    # "2026-09-20T06:49" -> "06:49"
+    def clock(key):
+        try:
+            return day[key][0][11:16]
+        except (KeyError, IndexError, TypeError):
+            return ''
+
+    out = ("temp=%.0f\ncode=%d\nhi=%.0f\nlo=%.0f\nrain_from=%d\nrain_max=%d\n"
+           "sunrise=%s\nsunset=%s\nupdated=%d\n" % (
         cur['temperature_2m'], cur['weather_code'],
         day['temperature_2m_max'][0], day['temperature_2m_min'][0],
-        rain_from, rain_max, int(time.time())))
+        rain_from, rain_max, clock('sunrise'), clock('sunset'), int(time.time())))
 except Exception as e:
     # Keep the stale file: yesterday's weather beats a blank panel, and the
     # UI greys it out once it is old. The timer retries.

@@ -106,6 +106,7 @@ static char cfg_tto[64]   = "";
 static int  transit_start = 8 * 60, transit_end = 9 * 60 + 30;   /* minutes since midnight */
 static int  transit_lead = 8;          /* minutes needed to reach the stop */
 static int  rain_pct = 40;             /* weather.py: chance that means "coat" */
+static int  hue_auto;                  /* daylight curve; hue.py does the work */
 static char cfg_lat[64] = "55.6078";   /* sized to the cfg value buffer */
 static char cfg_lon[64] = "12.9982";   /* weather.py reads both */
 
@@ -214,6 +215,7 @@ static void cfg_load(void)
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
         else if (!strcmp(k, "lat"))        snprintf(cfg_lat, sizeof cfg_lat, "%s", v);
         else if (!strcmp(k, "lon"))        snprintf(cfg_lon, sizeof cfg_lon, "%s", v);
+        else if (!strcmp(k, "hue_auto"))     hue_auto = atoi(v);
         else if (!strcmp(k, "transit_key"))  snprintf(cfg_tkey, sizeof cfg_tkey, "%s", v);
         else if (!strcmp(k, "transit_from")) snprintf(cfg_tfrom, sizeof cfg_tfrom, "%s", v);
         else if (!strcmp(k, "transit_to"))   snprintf(cfg_tto, sizeof cfg_tto, "%s", v);
@@ -228,23 +230,64 @@ static void cfg_load(void)
     fclose(f);
 }
 
+/* Keys this file owns and rewrites below. Anything else in cat_cfg.txt
+ * belongs to one of the scripts and is carried across untouched - hue.py
+ * alone has a dozen, and the pairing key among them cannot be regenerated
+ * without walking over and pressing the button on the bridge. */
+static int cfg_owned(const char *k)
+{
+    static const char *owned[] = {
+        "days", "name", "quiet_from", "quiet_to", "dim_pct", "backlight",
+        "reminder", "reminder_h", "reminder_m", "lat", "lon",
+        "transit_key", "transit_from", "transit_to",
+        "transit_start", "transit_end", "transit_lead", "rain_pct",
+        "hue_auto",
+    };
+    for (unsigned i = 0; i < sizeof owned / sizeof owned[0]; i++)
+        if (!strcmp(k, owned[i])) return 1;
+    return 0;
+}
+
 static void cfg_save(void)
 {
+    /* Read the foreign lines before truncating, or they are gone. */
+    char keep[2048];
+    size_t n_keep = 0;
+    FILE *in = fopen(cfg_path(), "r");
+    if (in) {
+        char line[256];
+        while (fgets(line, sizeof line, in)) {
+            char key[64];
+            const char *eq = strchr(line, '=');
+            if (!eq || (size_t)(eq - line) >= sizeof key) continue;
+            memcpy(key, line, eq - line);
+            key[eq - line] = '\0';
+            if (cfg_owned(key)) continue;
+            size_t len = strlen(line);
+            if (n_keep + len + 2 >= sizeof keep) break;   /* keep what fits */
+            memcpy(keep + n_keep, line, len);
+            n_keep += len;
+            if (line[len - 1] != '\n') keep[n_keep++] = '\n';
+        }
+        fclose(in);
+    }
+    keep[n_keep] = '\0';
+
     FILE *f = fopen(cfg_path(), "w");
     if (!f) { perror("cat cfg save"); return; }
     /* lat/lon are written back even though nothing in the UI edits them:
-     * cfg_save rewrites the whole file, so a key it does not know about
-     * would be silently dropped the first time a setting changed. */
+     * they are in the owned list, so nothing else would preserve them. */
     fprintf(f, "days=%d\nname=%s\nquiet_from=%d\nquiet_to=%d\ndim_pct=%d\nbacklight=%d\n"
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
                "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
                "transit_start=%02d:%02d\ntransit_end=%02d:%02d\ntransit_lead=%d\n"
-               "rain_pct=%d\n",
+               "rain_pct=%d\nhue_auto=%d\n%s",
             med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
             cfg_tkey, cfg_tfrom, cfg_tto,
             transit_start / 60, transit_start % 60,
-            transit_end / 60, transit_end % 60, transit_lead, rain_pct);
+            transit_end / 60, transit_end % 60, transit_lead, rain_pct,
+            hue_auto, keep);
     fclose(f);
 }
 
@@ -356,6 +399,11 @@ static void transit_load(void)
 static struct { char name[32]; int on, bri, reachable, mirek; } rooms[MAX_ROOMS];
 static int  n_rooms;
 static long hue_updated;
+/* Reported by hue.py: whether the curve is enabled, and what it is
+ * actually doing - "active", "summer", "closed", "manual". */
+static int  auto_on;
+static char auto_why[16] = "off";
+static char auto_room[32];
 
 /* A room icon from the symbols the font actually carries - there is no
  * emoji coverage here, only LV_SYMBOL_*. Unmatched rooms get the bulb. */
@@ -430,6 +478,16 @@ static void hue_load(void)
     char line[160];
     while (fgets(line, sizeof line, f)) {
         if (!strncmp(line, "updated=", 8)) { hue_updated = atol(line + 8); continue; }
+        if (!strncmp(line, "auto=", 5)) {
+            char *save = NULL;
+            char *t = strtok_r(line + 5, "|\n", &save);
+            if (t) auto_on = atoi(t);
+            if ((t = strtok_r(NULL, "|\n", &save)))
+                snprintf(auto_why, sizeof auto_why, "%s", t);
+            if ((t = strtok_r(NULL, "|\n", &save)))
+                snprintf(auto_room, sizeof auto_room, "%s", t);
+            continue;
+        }
         if (strncmp(line, "room=", 5) || n_rooms >= MAX_ROOMS) continue;
         char *save = NULL;
         int field = 0;
@@ -615,7 +673,7 @@ static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
 static struct {
     lv_obj_t *card, *ico, *name, *sld, *val, *val_ct;
 } room_row[MAX_ROOMS];
-static lv_obj_t *lbl_hue_none;
+static lv_obj_t *lbl_hue_none, *btn_auto, *lbl_auto;
 static int       laid_out_rooms = -1;   /* card geometry is sized to the count */
 static time_t    toast_until;
 static int       blink_on;
@@ -1513,6 +1571,9 @@ static void ct_preset_cb(lv_event_t *e)
 /* One row: icon and name on the left, brightness above warmth on the
  * right. Both sliders are full-height children so a press on either never
  * reaches the card underneath, which is what toggles the room. */
+#define AUTO_BAR_H 64
+#define AUTO_BAR_Y (BODY_H - AUTO_BAR_H)
+#define LIGHTS_H   (BODY_H - AUTO_BAR_H - CARD_GAP)
 #define ROW_SLD_X  400
 #define ROW_SLD_W  540
 #define ROW_VAL_X  980
@@ -1579,6 +1640,19 @@ static int mirek_kelvin(int mirek)
 {
     if (mirek < MIREK_MIN) mirek = MIREK_MIN;
     return ((1000000 / mirek) + 50) / 100 * 100;
+}
+
+/* The toggle only writes the setting; hue.py picks it up on its next pass
+ * and reports back through hue.txt, so the label follows what is actually
+ * happening rather than what was asked for. */
+static void auto_btn_cb(lv_event_t *e)
+{
+    (void)e;
+    hue_auto = !hue_auto;
+    cfg_save();
+    auto_on = hue_auto;
+    toast(hue_auto ? "Daylight automation on" : "Daylight automation off");
+    refresh_lights();
 }
 
 static void build_lights(lv_obj_t *s)
@@ -1651,6 +1725,18 @@ static void build_lights(lv_obj_t *s)
         lv_obj_align(k, LV_ALIGN_TOP_MID, 0, CT_PAD_Y + CT_LINE + CT_GAP);
     }
 
+    btn_auto = flat_btn(s);
+    lv_obj_set_size(btn_auto, 420, AUTO_BAR_H);
+    lv_obj_set_pos(btn_auto, 0, AUTO_BAR_Y);
+    lv_obj_set_style_bg_color(btn_auto, lv_color_hex(C_BORDER_ST), 0);
+    lv_obj_set_style_bg_opa(btn_auto, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(btn_auto, 0, 0);
+    lv_obj_set_style_radius(btn_auto, 16, 0);
+    lv_obj_set_style_pad_all(btn_auto, 0, 0);
+    lv_obj_add_event_cb(btn_auto, auto_btn_cb, LV_EVENT_CLICKED, NULL);
+    lbl_auto = text(btn_auto, 0, 0, "", &lv_font_montserrat_20, C_TEXT);
+    lv_obj_align(lbl_auto, LV_ALIGN_LEFT_MID, 20, 0);
+
     /* Shown when hue.py is not writing: a wall panel that silently does
      * nothing is worse than one that says why. */
     lbl_hue_none = text(s, 0, 0, "", &lv_font_montserrat_24, C_MUTED);
@@ -1658,9 +1744,40 @@ static void build_lights(lv_obj_t *s)
     lv_obj_add_flag(lbl_hue_none, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Enabled and doing nothing is the confusing state - a summer week, or
+ * the hours outside the window - so the button says which it is instead
+ * of just "On". */
+static void refresh_auto_btn(void)
+{
+    const char *room = auto_room[0] ? auto_room : "Hallway";
+    uint32_t col = C_TEXT2;
+    char buf[96];
+
+    if (!hue_auto) {
+        snprintf(buf, sizeof buf, LV_SYMBOL_POWER "  %s daylight  -  off", room);
+    } else if (!strcmp(auto_why, "active")) {
+        snprintf(buf, sizeof buf, LV_SYMBOL_POWER "  %s daylight  -  on", room);
+        col = C_OK_TEXT;
+    } else if (!strcmp(auto_why, "summer")) {
+        snprintf(buf, sizeof buf, LV_SYMBOL_POWER "  %s daylight  -  idle, long day", room);
+        col = C_WARN_TEXT;
+    } else if (!strcmp(auto_why, "manual")) {
+        snprintf(buf, sizeof buf, LV_SYMBOL_POWER "  %s daylight  -  you took over", room);
+        col = C_WARN_TEXT;
+    } else if (!strcmp(auto_why, "unreachable")) {
+        snprintf(buf, sizeof buf, LV_SYMBOL_POWER "  %s daylight  -  no bulbs", room);
+        col = C_BAD_TEXT;
+    } else {
+        snprintf(buf, sizeof buf, LV_SYMBOL_POWER "  %s daylight  -  outside hours", room);
+    }
+    lv_label_set_text(lbl_auto, buf);
+    lv_obj_set_style_text_color(lbl_auto, lv_color_hex(col), 0);
+}
+
 static void refresh_lights(void)
 {
     int live = hue_ok();
+    refresh_auto_btn();
 
     if (!live || n_rooms == 0) {
         for (int i = 0; i < MAX_ROOMS; i++) lv_obj_add_flag(room_row[i].card, LV_OBJ_FLAG_HIDDEN);
@@ -1675,7 +1792,7 @@ static void refresh_lights(void)
     /* Cards divide the body evenly, so the screen is full whether the
      * bridge reports one room or four. Only redone when the count moves. */
     if (n_rooms != laid_out_rooms) {
-        int h = (BODY_H - (n_rooms - 1) * CARD_GAP) / n_rooms;
+        int h = (LIGHTS_H - (n_rooms - 1) * CARD_GAP) / n_rooms;
         for (int i = 0; i < MAX_ROOMS; i++) {
             if (i < n_rooms) {
                 lv_obj_set_size(room_row[i].card, BODY_W, h);
