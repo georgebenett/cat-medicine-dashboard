@@ -1471,10 +1471,10 @@ static void room_set_on(int i, int on)
  * lighting guidance - under 3000K to wind down, ~4500K neutral, and the
  * bulb's cool limit to wake up. hue.py clamps each to what the room can
  * physically produce. */
-static const struct { const char *name; int mirek; } CT_PRESET[] = {
-    { "Relax",    370 },   /* 2700K */
-    { "Daylight", 222 },   /* 4500K */
-    { "Energize", 153 },   /* 6500K */
+static const struct { const char *name; int mirek, kelvin; } CT_PRESET[] = {
+    { "Relax",    370, 2700 },
+    { "Daylight", 222, 4500 },
+    { "Energize", 153, 6500 },
 };
 #define N_CT_PRESET ((int)(sizeof CT_PRESET / sizeof CT_PRESET[0]))
 
@@ -1631,13 +1631,13 @@ static void build_lights(lv_obj_t *s)
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
         lv_obj_add_event_cb(b, ct_preset_cb, LV_EVENT_CLICKED, (void *)(intptr_t)p);
         lv_obj_t *l = text(b, 0, 0, CT_PRESET[p].name, &lv_font_montserrat_20, C_BG);
-        lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 16);
+        lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 22);
         lv_obj_t *k = lv_label_create(b);
-        lv_label_set_text_fmt(k, "%dK", mirek_kelvin(CT_PRESET[p].mirek));
+        lv_label_set_text_fmt(k, "%dK", CT_PRESET[p].kelvin);
         lv_obj_set_style_text_font(k, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(k, lv_color_hex(C_BG), 0);
         lv_obj_set_style_text_opa(k, LV_OPA_60, 0);
-        lv_obj_align(k, LV_ALIGN_BOTTOM_MID, 0, -16);
+        lv_obj_align(k, LV_ALIGN_BOTTOM_MID, 0, -22);
     }
 
     /* Shown when hue.py is not writing: a wall panel that silently does
