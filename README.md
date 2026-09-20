@@ -180,6 +180,18 @@ transit_start=08:00    departure board window
 transit_end=09:30
 hue_bridge=            Hue bridge IP - not in the UI
 hue_key=               bridge application key, from ./hue.py --pair
+hue_auto=0             daylight curve - the button on the Lights screen
+hue_auto_room=Hallway  which room it steers
+hue_auto_from=07:00    window; outside it the room is yours
+hue_auto_to=22:00      and it switches off here
+hue_auto_ramp=30       minutes to reach hue_auto_day from dark
+hue_auto_day=80        brightness once the ramp is done
+hue_auto_peak=100      brightness at sunset - the darkest useful hour
+hue_auto_night=35      brightness as the window closes
+hue_auto_cool=200      mirek at the window opening (5000K)
+hue_auto_warm=370      mirek at sunset (2700K)
+hue_auto_late=454      mirek at the window closing (2200K)
+hue_auto_skip_daylen=16  hours of daylight above which it sits the day out
 ```
 
 `cat_log.csv` is the record, one event per line, append-only:

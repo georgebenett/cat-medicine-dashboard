@@ -187,6 +187,7 @@ def auto_cfg():
         'from':  hhmm(cfg('hue_auto_from', '07:00'), 7 * 60),
         'to':    hhmm(cfg('hue_auto_to', '22:00'), 22 * 60),
         'day':   int(cfg('hue_auto_day', '80')),
+        'peak':  int(cfg('hue_auto_peak', '100')),   # at sunset, the darkest useful hour
         'night': int(cfg('hue_auto_night', '35')),
         'ramp':  int(cfg('hue_auto_ramp', '30')),
         'cool':  int(cfg('hue_auto_cool', '200')),    # 5000K, window opens
@@ -247,12 +248,17 @@ def auto_target(mins, sunrise, sunset, a):
     else:
         mirek = lerp(a['warm'], a['late'], (mins - ss) / float(a['to'] - ss))
 
-    if a['ramp'] > 0 and mins < a['from'] + a['ramp']:
+    # Brightness climbs to its peak AT sunset rather than sitting flat all
+    # day. Indoors the hour before sunset is the darkest part of the useful
+    # day - until then the windows are doing half the work - so a flat
+    # daytime level is either too dim at dusk or wasteful at noon.
+    ramp_end = a['from'] + a['ramp']
+    if a['ramp'] > 0 and mins < ramp_end:
         bri = lerp(1, a['day'], (mins - a['from']) / float(a['ramp']))
     elif mins < ss:
-        bri = a['day']
+        bri = lerp(a['day'], a['peak'], (mins - ramp_end) / float(max(1, ss - ramp_end)))
     else:
-        bri = lerp(a['day'], a['night'], (mins - ss) / float(a['to'] - ss))
+        bri = lerp(a['peak'], a['night'], (mins - ss) / float(a['to'] - ss))
 
     return int(round(bri)), int(round(mirek))
 
@@ -373,8 +379,9 @@ def auto_run(rs, a, state):
 def selftest():
     """Curve checks against real Malmo solar times."""
     a = auto_cfg()
-    a.update({'on': 1, 'from': 7 * 60, 'to': 22 * 60, 'day': 80, 'night': 35,
-              'ramp': 30, 'cool': 200, 'warm': 370, 'late': 454, 'skip': 16})
+    a.update({'on': 1, 'from': 7 * 60, 'to': 22 * 60, 'day': 80, 'peak': 100,
+              'night': 35, 'ramp': 30, 'cool': 200, 'warm': 370, 'late': 454,
+              'skip': 16})
 
     win_r, win_s = 9 * 60 + 34, 16 * 60 + 37     # 21 Dec
     sum_r, sum_s = 4 * 60 + 24, 21 * 60 + 55     # 21 Jun
@@ -393,9 +400,31 @@ def selftest():
     bri, mirek = auto_target(7 * 60 + 1, eq_r, eq_s, a)
     assert bri < 10 and mirek <= 205, (bri, mirek)
 
-    # Ramp is done by its end, and brightness holds through the day.
+    # Ramp reaches the day level, then climbs towards the sunset peak.
     assert auto_target(7 * 60 + 30, eq_r, eq_s, a)[0] == 80
-    assert auto_target(13 * 60, eq_r, eq_s, a)[0] == 80
+    assert 80 < auto_target(13 * 60, eq_r, eq_s, a)[0] < 100
+
+    # The complaint that prompted this: 19:00, twelve minutes before a
+    # 19:12 sunset, used to sit at a flat 80%.
+    assert auto_target(19 * 60, eq_r, eq_s, a)[0] >= 99
+
+    # Peak lands on sunset itself, whenever that is, and is the day's max.
+    for r, s_ in ((win_r, win_s), (eq_r, eq_s)):
+        assert auto_target(s_, r, s_, a)[0] == 100
+        assert max(auto_target(m, r, s_, a)[0]
+                   for m in range(7 * 60, 22 * 60)) == 100
+
+    # Brightness rises all the way to sunset, then falls all the way out.
+    prev = -1
+    for m in range(7 * 60 + 30, win_s):
+        b = auto_target(m, win_r, win_s, a)[0]
+        assert b >= prev, (m, b, prev)
+        prev = b
+    prev = 101
+    for m in range(win_s, 22 * 60):
+        b = auto_target(m, win_r, win_s, a)[0]
+        assert b <= prev, (m, b, prev)
+        prev = b
 
     # Sunset is the warm anchor, whenever it happens to fall.
     for r, s in ((win_r, win_s), (eq_r, eq_s)):
