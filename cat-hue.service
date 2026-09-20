@@ -1,0 +1,14 @@
+[Unit]
+Description=Philips Hue room state and commands for the dashboard
+After=network-online.target
+
+[Service]
+Type=simple
+User=georges
+WorkingDirectory=/home/georges/cat-medicine-dashboard
+ExecStart=/usr/bin/python3 /home/georges/cat-medicine-dashboard/hue.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

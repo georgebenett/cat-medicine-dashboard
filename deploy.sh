@@ -31,7 +31,7 @@ changed=0
 for u in lvglapp.service cat-backup.service cat-backup.timer \
          cat-weather.service cat-weather.timer \
          cat-wifi.service cat-wifi.timer cat-dim.service \
-         cat-transit.service cat-transit.timer; do
+         cat-transit.service cat-transit.timer cat-hue.service; do
     if ! cmp -s "$u" "/etc/systemd/system/$u"; then
         sudo cp "$u" "/etc/systemd/system/$u"
         # Verify: a brownout mid-copy left cat-dim.service zero length once,
@@ -50,8 +50,10 @@ if [ "$changed" = 1 ]; then
     # cat-backup.service is oneshot and triggered by its timer, so only the
     # dashboard and the timer are enabled at boot.
     sudo systemctl enable lvglapp cat-backup.timer cat-weather.timer cat-wifi.timer \
-        cat-dim.service cat-transit.timer
+        cat-dim.service cat-transit.timer cat-hue.service
     sudo systemctl start cat-backup.timer cat-weather.timer cat-wifi.timer cat-transit.timer
+    # A daemon, not a timer: restart so a changed hue.py actually takes effect.
+    sudo systemctl restart cat-hue.service
 fi
 
 sudo systemctl start lvglapp

@@ -10,6 +10,10 @@ app
 cat_log.csv
 cat_cfg.txt
 
+# written by the timers / hue daemon, regenerated on every run
+hue.txt
+hue.cmd
+
 # her photos - 6MB of binaries, re-exported whenever the card geometry
 # changes, and regenerable from the originals. Copied over with scp.
 photos/

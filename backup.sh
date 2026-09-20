@@ -23,7 +23,8 @@ copied=0
 # Redact the API key: the config is worth backing up, the credential is
 # not, and this repo is a remote we do not want secrets ending up in.
 [ -f cat_cfg.txt ] && {
-    sed 's/^transit_key=.*/transit_key=<redacted>/' cat_cfg.txt > "$REPO/cat_cfg.txt"
+    sed -e 's/^transit_key=.*/transit_key=<redacted>/' \
+        -e 's/^hue_key=.*/hue_key=<redacted>/' cat_cfg.txt > "$REPO/cat_cfg.txt"
     copied=1
 }
 # Archives from a Reset, so a mis-tap is recoverable from the backup too.

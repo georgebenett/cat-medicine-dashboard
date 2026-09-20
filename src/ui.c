@@ -344,6 +344,54 @@ static void transit_load(void)
     fclose(f);
 }
 
+/* --- lights ---------------------------------------------------------- */
+
+/* hue.py writes the state and consumes the commands; nothing here touches
+ * the network. A blocking HTTP call in this loop would stall the panel for
+ * the length of the request, which is what the file hand-off exists to
+ * avoid. Rooms are addressed by index - hue.py sorts them by name. */
+#define MAX_ROOMS 4
+static struct { char name[32]; int on, bri; } rooms[MAX_ROOMS];
+static int  n_rooms;
+static long hue_updated;
+
+static void hue_load(void)
+{
+    FILE *f = fopen(env_or("CAT_HUE", "hue.txt"), "r");
+    n_rooms = 0;
+    hue_updated = 0;
+    if (!f) return;
+    char line[160];
+    while (fgets(line, sizeof line, f)) {
+        if (!strncmp(line, "updated=", 8)) { hue_updated = atol(line + 8); continue; }
+        if (strncmp(line, "room=", 5) || n_rooms >= MAX_ROOMS) continue;
+        char *save = NULL;
+        int field = 0;
+        for (char *tok = strtok_r(line + 5, "|\n", &save); tok && field < 3;
+             tok = strtok_r(NULL, "|\n", &save), field++) {
+            switch (field) {
+                case 0: snprintf(rooms[n_rooms].name, sizeof rooms[0].name, "%s", tok); break;
+                case 1: rooms[n_rooms].on  = atoi(tok); break;
+                case 2: rooms[n_rooms].bri = atoi(tok); break;
+            }
+        }
+        if (field >= 3) n_rooms++;
+    }
+    fclose(f);
+}
+
+/* The bridge is on the LAN, but the round trip still runs through a file
+ * and a 2s poll. The widget moves now and the next poll confirms it. */
+static void hue_send(int idx)
+{
+    FILE *f = fopen(env_or("CAT_HUE_CMD", "hue.cmd"), "a");
+    if (!f) return;
+    fprintf(f, "set %d %d %d\n", idx, rooms[idx].on, rooms[idx].bri);
+    fclose(f);
+}
+
+static int hue_ok(void) { return hue_updated && (long)time(NULL) - hue_updated < 30; }
+
 /* Minutes from now until "HH:MM", negative if it has been and gone. */
 static int mins_until(const char *hhmm, const struct tm *t)
 {
@@ -451,10 +499,10 @@ static void month_progress(int y, int m, int *given, int *due)
 
 static lv_obj_t *ui_backlight_slider;
 
-static lv_obj_t *screens[3];
+static lv_obj_t *screens[4];
 static int  cur_screen;
 static int  cal_y, cal_m;                                /* month the calendar shows */
-static lv_obj_t *rail_items[3];
+static lv_obj_t *rail_items[4];
 
 /* A day in the week strip or the month grid: the number, and up to two
  * dots under it. Apple Calendar's language - a filled circle marks today
@@ -474,6 +522,9 @@ static time_t    rail_shown_at;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
+static struct { lv_obj_t *card, *name, *sw, *sld, *val; } room_row[MAX_ROOMS];
+static lv_obj_t *lbl_hue_none;
+static int       laid_out_rooms = -1;   /* card geometry is sized to the count */
 static time_t    toast_until;
 static int       blink_on;
 
@@ -617,7 +668,7 @@ static void show_screen(int i)
 {
     cur_screen = i;
     if (pop_event) lv_obj_add_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < 4; k++) {
         if (k == i) lv_obj_clear_flag(screens[k], LV_OBJ_FLAG_HIDDEN);
         else        lv_obj_add_flag(screens[k], LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_opa(rail_items[k], k == i ? LV_OPA_COVER : LV_OPA_0, 0);
@@ -884,7 +935,8 @@ static void refresh_status_icons(void)
 
 static void build_rail(lv_obj_t *parent)
 {
-    static const char *icons[3] = { LV_SYMBOL_HOME, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS };
+    static const char *icons[4] = { LV_SYMBOL_HOME, LV_SYMBOL_LIST,
+                                    LV_SYMBOL_CHARGE, LV_SYMBOL_SETTINGS };
     (void)parent;
 
     /* Tap strip down the left edge that summons the rail. */
@@ -913,7 +965,7 @@ static void build_rail(lv_obj_t *parent)
     lv_obj_set_style_border_color(rail, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(rail, 1, 0);
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         lv_obj_t *it = box(rail, 14, 20 + i * 80, 64, 64, C_ACC_BG, 16);
         lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(it, LV_OBJ_FLAG_PRESS_LOCK);
@@ -1301,6 +1353,127 @@ static lv_obj_t *settings_row(int idx, const char *icon, const char *label)
     return c;
 }
 
+/* --- lights screen --------------------------------------------------- */
+
+static void refresh_lights(void);
+
+static void room_sw_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms) return;
+    rooms[i].on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    /* Switching on a room the bridge last saw at 0% would turn it on at
+     * nothing. Give it a level worth seeing. */
+    if (rooms[i].on && rooms[i].bri == 0) rooms[i].bri = 60;
+    hue_send(i);
+    refresh_lights();
+}
+
+/* Dragging fires this per pixel. Writing a command each time would queue
+ * hundreds of bridge calls for one gesture, so only the label moves here -
+ * the command goes out on release, the same split as the backlight slider. */
+static void room_sld_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms) return;
+    rooms[i].bri = lv_slider_get_value(lv_event_get_target(e));
+    lv_label_set_text_fmt(room_row[i].val, "%d%%", rooms[i].bri);
+}
+
+static void room_sld_save_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= n_rooms) return;
+    /* Dragging a dark room up is how you turn it on; no second tap. */
+    if (rooms[i].bri > 0 && !rooms[i].on) rooms[i].on = 1;
+    hue_send(i);
+    refresh_lights();
+}
+
+static void build_lights(lv_obj_t *s)
+{
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        lv_obj_t *c = box(s, 0, 0, BODY_W, 100, C_SURF1, 20);
+        lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+        room_row[i].card = c;
+
+        lv_obj_t *ico = text(c, 0, 0, LV_SYMBOL_CHARGE, &lv_font_montserrat_28, C_WARN_TEXT);
+        lv_obj_align(ico, LV_ALIGN_LEFT_MID, 28, 0);
+
+        room_row[i].name = text(c, 0, 0, "", &lv_font_montserrat_28, C_TEXT);
+        lv_obj_align(room_row[i].name, LV_ALIGN_LEFT_MID, 80, 0);
+
+        lv_obj_t *sl = lv_slider_create(c);
+        lv_obj_set_size(sl, 500, 12);
+        lv_obj_align(sl, LV_ALIGN_LEFT_MID, 400, 0);
+        lv_obj_set_style_pad_all(sl, 8, LV_PART_KNOB);
+        lv_slider_set_range(sl, 0, 100);
+        lv_obj_add_event_cb(sl, room_sld_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(sl, room_sld_save_cb, LV_EVENT_RELEASED, (void *)(intptr_t)i);
+        lv_obj_set_style_bg_color(sl, lv_color_hex(C_WARN_TEXT), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(sl, lv_color_hex(C_WARN_TEXT), LV_PART_KNOB);
+        room_row[i].sld = sl;
+
+        room_row[i].val = text(c, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
+        lv_obj_align(room_row[i].val, LV_ALIGN_LEFT_MID, 930, 0);
+
+        lv_obj_t *sw = lv_switch_create(c);
+        lv_obj_set_size(sw, 84, 44);
+        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -28, 0);
+        lv_obj_set_style_bg_color(sw, lv_color_hex(C_WARN_TEXT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+        lv_obj_add_event_cb(sw, room_sw_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
+        room_row[i].sw = sw;
+    }
+
+    /* Shown when hue.py is not writing: a wall panel that silently does
+     * nothing is worse than one that says why. */
+    lbl_hue_none = text(s, 0, 0, "", &lv_font_montserrat_24, C_MUTED);
+    lv_obj_align(lbl_hue_none, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(lbl_hue_none, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void refresh_lights(void)
+{
+    int live = hue_ok();
+
+    if (!live || n_rooms == 0) {
+        for (int i = 0; i < MAX_ROOMS; i++) lv_obj_add_flag(room_row[i].card, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(lbl_hue_none, hue_updated ? "Hue bridge not responding"
+                                                    : "No lights configured");
+        lv_obj_clear_flag(lbl_hue_none, LV_OBJ_FLAG_HIDDEN);
+        laid_out_rooms = -1;
+        return;
+    }
+    lv_obj_add_flag(lbl_hue_none, LV_OBJ_FLAG_HIDDEN);
+
+    /* Cards divide the body evenly, so the screen is full whether the
+     * bridge reports one room or four. Only redone when the count moves. */
+    if (n_rooms != laid_out_rooms) {
+        int h = (BODY_H - (n_rooms - 1) * CARD_GAP) / n_rooms;
+        for (int i = 0; i < MAX_ROOMS; i++) {
+            if (i < n_rooms) {
+                lv_obj_set_size(room_row[i].card, BODY_W, h);
+                lv_obj_set_pos(room_row[i].card, 0, i * (h + CARD_GAP));
+                lv_obj_clear_flag(room_row[i].card, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(room_row[i].card, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        laid_out_rooms = n_rooms;
+    }
+
+    for (int i = 0; i < n_rooms; i++) {
+        lv_label_set_text(room_row[i].name, rooms[i].name);
+        /* Do not yank the knob out from under a finger mid-drag. */
+        if (!lv_obj_has_state(room_row[i].sld, LV_STATE_PRESSED)) {
+            lv_slider_set_value(room_row[i].sld, rooms[i].bri, LV_ANIM_OFF);
+            lv_label_set_text_fmt(room_row[i].val, "%d%%", rooms[i].bri);
+        }
+        if (rooms[i].on) lv_obj_add_state(room_row[i].sw, LV_STATE_CHECKED);
+        else             lv_obj_clear_state(room_row[i].sw, LV_STATE_CHECKED);
+    }
+}
+
 static void build_settings(lv_obj_t *s)
 {
     const int VX = 300;
@@ -1620,6 +1793,8 @@ static void refresh(void)
     long today = sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
     refresh_home(&t, today);
     refresh_calendar(today);
+    hue_load();
+    refresh_lights();
     refresh_settings(&t);
 }
 
@@ -1646,7 +1821,7 @@ void ui_init(void)
 
     build_rail(scr);
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         screens[i] = box(scr, BODY_X, PAD, BODY_W, BODY_H, C_BG, 0);
         lv_obj_set_style_bg_opa(screens[i], LV_OPA_0, 0);
     }
@@ -1654,7 +1829,8 @@ void ui_init(void)
     build_transit(screens[0]);
     build_event_popover();
     build_calendar(screens[1]);
-    build_settings(screens[2]);
+    build_lights(screens[2]);
+    build_settings(screens[3]);
 
     /* Plain white text at the bottom of the screen. It was a blue capsule
      * at font 24 with 16px padding, which for a three-second confirmation
@@ -1663,10 +1839,10 @@ void ui_init(void)
     lv_obj_align(lbl_toast, LV_ALIGN_BOTTOM_MID, 0, -16);
     lv_obj_add_flag(lbl_toast, LV_OBJ_FLAG_HIDDEN);
 
-    /* CAT_SCREEN=0|1|2 picks the screen to open on. Same spirit as
+    /* CAT_SCREEN=0|1|2|3 picks the screen to open on. Same spirit as
      * TOUCH_DEBUG in main.c: a way to look at a screen without a finger. */
     const char *sc = getenv("CAT_SCREEN");
-    show_screen(sc ? atoi(sc) % 3 : 0);
+    show_screen(sc ? atoi(sc) % 4 : 0);
     if (getenv("CAT_POPUP")) lv_obj_clear_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
     if (getenv("CAT_TOAST")) { toast(getenv("CAT_TOAST")); toast_until = 0; }  /* 0 = stays up */
 
@@ -1728,8 +1904,13 @@ void ui_tick(void)
     if (jumped || t.tm_min != last_min) {
         last_min = t.tm_min;
         if (cur_screen == 0) refresh_home(&t, sched_day_num(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday));
-        if (cur_screen == 2) refresh_settings(&t);
+        if (cur_screen == 3) refresh_settings(&t);
     }
+
+    /* Lights change from wall switches and phones too, so while that screen
+     * is up it follows the daemon's file every second rather than waiting
+     * for the minute tick the rest of the UI runs on. */
+    if (cur_screen == 2) { hue_load(); refresh_lights(); }
 
     if (rail_shown_at && now - rail_shown_at >= RAIL_SECS) rail_hide();
 
