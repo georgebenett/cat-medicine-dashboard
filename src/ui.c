@@ -71,6 +71,7 @@
 #define WEEK_Y    (CLOCK_Y + CLOCK_H + CARD_GAP)
 #define EDGE_W   40      /* swipe-from-here strip */
 #define RAIL_SECS 30     /* auto-hide */
+#define HOME_SECS 10     /* idle on any other screen -> back to Today */
 #define RIGHT_X  (PHOTO_W + GAP)
 #define RIGHT_W  (BODY_W - RIGHT_X)
 #define BTN_W    ((RIGHT_W - 22) / 2)
@@ -1911,6 +1912,14 @@ void ui_tick(void)
      * is up it follows the daemon's file every second rather than waiting
      * for the minute tick the rest of the UI runs on. */
     if (cur_screen == 2) { hue_load(); refresh_lights(); }
+
+    /* Every screen but Today is one you opened to do a single thing. Go
+     * back once the finger stops, so whoever next walks past the panel
+     * finds the dose status on it rather than whatever was left open.
+     * LVGL already tracks this: any press or release resets the clock, so
+     * a long slider drag counts as activity throughout. */
+    if (cur_screen != 0 && lv_disp_get_inactive_time(NULL) > HOME_SECS * 1000)
+        show_screen(0);
 
     if (rail_shown_at && now - rail_shown_at >= RAIL_SECS) rail_hide();
 
