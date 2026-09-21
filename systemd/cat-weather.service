@@ -1,5 +1,5 @@
 [Unit]
-Description=Fetch the morning commute departures
+Description=Fetch weather for the cat dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -7,4 +7,4 @@ Wants=network-online.target
 Type=oneshot
 User=georges
 WorkingDirectory=/home/georges/cat-medicine-dashboard
-ExecStart=/home/georges/cat-medicine-dashboard/transit.py
+ExecStart=/home/georges/cat-medicine-dashboard/scripts/weather.py

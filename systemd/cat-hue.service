@@ -6,7 +6,7 @@ After=network-online.target
 Type=simple
 User=georges
 WorkingDirectory=/home/georges/cat-medicine-dashboard
-ExecStart=/usr/bin/python3 /home/georges/cat-medicine-dashboard/hue.py
+ExecStart=/usr/bin/python3 /home/georges/cat-medicine-dashboard/scripts/hue.py
 Restart=always
 RestartSec=10
 

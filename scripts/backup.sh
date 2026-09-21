@@ -8,7 +8,7 @@
 #
 # Run by cat-backup.timer, hourly. Safe to run by hand.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."   # scripts/ -> project root
 
 REPO="${CAT_BACKUP_REPO:-$HOME/cat_backup}"
 if [ ! -d "$REPO/.git" ]; then

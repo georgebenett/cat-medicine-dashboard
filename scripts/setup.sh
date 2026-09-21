@@ -6,7 +6,7 @@
 # and apt-get'd git using a hardcoded sudo password, on a machine that
 # had just used git to clone this.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."   # scripts/ -> project root
 
 if [ ! -d lvgl ]; then
     echo "### cloning lvgl 8.3 (125MB, not vendored)"

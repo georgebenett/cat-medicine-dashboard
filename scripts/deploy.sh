@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run on the Pi: pull, rebuild, (re)install the service, restart.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."   # scripts/ -> project root
 # Not fatal. This Pi's wifi drops, and being unable to restart the panel
 # because github is unreachable is worse than deploying what is already
 # checked out - so say plainly which commit is going on, and carry on.
@@ -32,12 +32,12 @@ for u in lvglapp.service cat-backup.service cat-backup.timer \
          cat-weather.service cat-weather.timer \
          cat-wifi.service cat-wifi.timer cat-dim.service \
          cat-transit.service cat-transit.timer cat-hue.service; do
-    if ! cmp -s "$u" "/etc/systemd/system/$u"; then
-        sudo cp "$u" "/etc/systemd/system/$u"
+    if ! cmp -s "systemd/$u" "/etc/systemd/system/$u"; then
+        sudo cp "systemd/$u" "/etc/systemd/system/$u"
         # Verify: a brownout mid-copy left cat-dim.service zero length once,
         # and systemd reads a zero-length unit as *masked* - so it silently
         # never ran rather than failing loudly.
-        if ! cmp -s "$u" "/etc/systemd/system/$u"; then
+        if ! cmp -s "systemd/$u" "/etc/systemd/system/$u"; then
             echo "ERROR: $u did not install correctly" >&2
             exit 1
         fi

@@ -330,11 +330,11 @@ static void weather_load(void)
 /* WMO weather codes, collapsed to the five icons that exist. */
 static const char *wx_icon_file(int code)
 {
-    if (code == 0)                 return "A:wx_clear.png";
-    if (code <= 2)                 return "A:wx_partly.png";
-    if (code == 3 || code == 45 || code == 48) return "A:wx_cloud.png";
-    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "A:wx_snow.png";
-    return "A:wx_rain.png";        /* drizzle, rain, showers, thunder */
+    if (code == 0)                 return "A:icons/wx_clear.png";
+    if (code <= 2)                 return "A:icons/wx_partly.png";
+    if (code == 3 || code == 45 || code == 48) return "A:icons/wx_cloud.png";
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "A:icons/wx_snow.png";
+    return "A:icons/wx_rain.png";        /* drizzle, rain, showers, thunder */
 }
 
 static const char *wx_words(int code)
@@ -1337,8 +1337,8 @@ static void build_home(lv_obj_t *s)
     lv_obj_center(row);
 
     icon_dose = lv_img_create(row);
-    if (access("pill.png", R_OK) == 0) lv_img_set_src(icon_dose, "A:pill.png");
-    else printf("pill.png missing - button shows text only\n");
+    if (access("icons/pill.png", R_OK) == 0) lv_img_set_src(icon_dose, "A:icons/pill.png");
+    else printf("icons/pill.png missing - button shows text only\n");
 
     lbl_btn_dose = lv_label_create(row);
     /* 24, not 28: the button is BTN_W (310px) wide and the toggled label

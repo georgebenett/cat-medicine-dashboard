@@ -11,7 +11,9 @@ Open-Meteo needs no API key. Location comes from lat/lon in cat_cfg.txt.
 import json, os, sys, time, urllib.request
 from datetime import datetime
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# The data files (cat_cfg.txt, the .txt hand-offs) live at the project
+# root, one level up from scripts/.
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 
 def cfg(key, default):
     try:

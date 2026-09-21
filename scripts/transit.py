@@ -11,12 +11,14 @@ morning rather than 288 a day, which keeps it inside any free tier.
 Writes six trips, not three: the UI drops any departure closer than
 transit_lead minutes, and filtering here would go stale between runs.
 
-  ./transit.py --lookup "Malmo Varnhem"   find a stop id
+  ./scripts/transit.py --lookup "Malmo Varnhem"   find a stop id
 """
 import json, os, sys, time, urllib.parse, urllib.request
 from datetime import datetime
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# The data files (cat_cfg.txt, the .txt hand-offs) live at the project
+# root, one level up from scripts/.
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 
 def cfg(key, default=None):
     try:

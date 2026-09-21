@@ -18,13 +18,15 @@ so a press feels instant even though the bridge round-trip happens here.
 Rooms are addressed by index, not UUID, to keep 36-char identifiers out of
 ui.c - the order is sorted by name, so it is stable across restarts.
 
-  ./hue.py --pair     press the bridge button first, prints the key
-  ./hue.py --once     one poll, print state, exit
+  ./scripts/hue.py --pair     press the bridge button first, prints the key
+  ./scripts/hue.py --once     one poll, print state, exit
 """
 import json, os, ssl, sys, time, urllib.request
 from datetime import datetime, timedelta
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# The data files (cat_cfg.txt, the .txt hand-offs) live at the project
+# root, one level up from scripts/.
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 
 POLL = 2.0          # on/off + brightness; the bridge is on the LAN, this is cheap
 STRUCT_EVERY = 30.0 # rooms, bulb membership, mesh health - all near-static
@@ -468,7 +470,7 @@ def main():
         return pair()
 
     if not KEY:
-        print("no hue_key in cat_cfg.txt - run ./hue.py --pair", file=sys.stderr)
+        print("no hue_key in cat_cfg.txt - run ./scripts/hue.py --pair", file=sys.stderr)
         return 0
 
     if '--once' in sys.argv:

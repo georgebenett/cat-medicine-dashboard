@@ -7,4 +7,4 @@ Wants=network-online.target
 Type=oneshot
 User=georges
 WorkingDirectory=/home/georges/cat-medicine-dashboard
-ExecStart=/home/georges/cat-medicine-dashboard/backup.sh
+ExecStart=/home/georges/cat-medicine-dashboard/scripts/backup.sh

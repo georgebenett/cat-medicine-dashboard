@@ -13,7 +13,7 @@
 # This is for looking at the UI, not for running it: normal operation is
 # the service, which deploy.sh installs and starts at boot.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."   # scripts/ -> project root
 
 sudo -v || { echo "needs sudo: the service and fbcon are both root-owned"; exit 1; }
 

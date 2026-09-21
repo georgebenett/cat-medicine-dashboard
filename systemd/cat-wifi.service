@@ -4,4 +4,4 @@ After=NetworkManager.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/georges/cat-medicine-dashboard/wifi_watchdog.sh
+ExecStart=/home/georges/cat-medicine-dashboard/scripts/wifi_watchdog.sh

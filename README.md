@@ -79,7 +79,7 @@ fetches it:
 ```sh
 git clone https://github.com/georgebenett/cat-medicine-dashboard.git ~/cat-medicine-dashboard
 cd ~/cat-medicine-dashboard
-./setup.sh          # clones LVGL release/v8.3, builds. A few minutes on a 3A+.
+./scripts/setup.sh          # clones LVGL release/v8.3, builds. A few minutes on a 3A+.
 ```
 
 **2. Add photos.** Any PNG in `photos/`, one shown per day. They must
@@ -95,7 +95,7 @@ mkdir -p photos
 at boot and restarts the dashboard:
 
 ```sh
-./deploy.sh
+./scripts/deploy.sh
 ```
 
 > The unit files hardcode `/home/georges/cat-medicine-dashboard`. Edit the five
@@ -117,8 +117,8 @@ shut their own API down in 2021:
 
 ```sh
 echo 'transit_key=YOUR_KEY' >> cat_cfg.txt
-./transit.py --lookup "Malmo Varnhem"        # find the stop ids
-./transit.py --lookup "Lund Scheeleparken"
+./scripts/transit.py --lookup "Malmo Varnhem"        # find the stop ids
+./scripts/transit.py --lookup "Lund Scheeleparken"
 ```
 
 then add `transit_from=` and `transit_to=` with those ids.
@@ -131,9 +131,9 @@ a bridge in the next room would be worse if it could.
 
 ```sh
 echo 'hue_bridge=192.168.1.20' >> cat_cfg.txt   # curl https://discovery.meethue.com
-./hue.py --pair                                 # press the round button first
+./scripts/hue.py --pair                                 # press the round button first
 echo 'hue_key=THE_KEY_IT_PRINTS' >> cat_cfg.txt
-./hue.py --once                                 # should list your rooms
+./scripts/hue.py --once                                 # should list your rooms
 ```
 
 Rooms come from the bridge, so they are named and grouped wherever you
@@ -146,7 +146,7 @@ into a clone of a private repo and pushes hourly:
 
 ```sh
 git clone git@github.com:YOU/cat-log-backup.git ~/cat_backup
-./backup.sh                                  # check it works
+./scripts/backup.sh                                  # check it works
 ```
 
 It commits only when the log actually changed, and a wifi drop is not an
@@ -185,7 +185,7 @@ transit_lead=8         minutes you need to reach the stop
 transit_start=08:00    departure board window
 transit_end=09:30
 hue_bridge=            Hue bridge IP - not in the UI
-hue_key=               bridge application key, from ./hue.py --pair
+hue_key=               bridge application key, from ./scripts/hue.py --pair
 hue_auto=0             daylight curve - the button on the Lights screen
 hue_auto_room=Hallway  which room it steers
 hue_auto_from=07:00    window; outside it the room is yours
@@ -323,7 +323,7 @@ perceptually even unit, so a straight line between two of them looks like a
 straight fade. The same line in kelvin crawls at the warm end and races at
 the cool one.
 
-`./hue.py --selftest` checks the curve against real Malmo solstice and
+`./scripts/hue.py --selftest` checks the curve against real Malmo solstice and
 equinox times without needing a bridge.
 
 ### Backlight
@@ -391,14 +391,30 @@ Things that cost real debugging time, kept here so they cost it once:
   `examples/` - 234 object files of music player and benchmark linked into
   your binary. Include the seven `src/*.mk` files instead.
 
+## Layout
+
+```
+main.c  Makefile  lv_conf.h      framebuffer + LVGL setup, build
+src/       ui.c and the header-only date/touch logic, plus the clock font
+icons/     button and weather PNGs, loaded at runtime (not compiled in)
+scripts/   the timers' work: weather, transit, hue, backup, wifi, deploy
+systemd/   one unit per script; deploy.sh installs and verifies them
+tests/     the panel-free checks `make test` runs
+docs/      screenshots used by this file
+```
+
+Data files - `cat_cfg.txt`, `cat_log.csv`, `photos/` and the `.txt`
+hand-offs - live at the root and are gitignored. The scripts `cd` to the
+root regardless of where they are invoked from, so that stays true.
+
 ## Development
 
 ```sh
 make               # build
 make test          # date/schedule maths and the touch latch, no panel needed
-./hue.py --selftest  # the daylight curve, no bridge needed
-./deploy.sh        # pull, rebuild, reinstall units, restart
-./run.sh           # foreground, Ctrl+C to quit - stops the service and unbinds fbcon
+./scripts/hue.py --selftest  # the daylight curve, no bridge needed
+./scripts/deploy.sh        # pull, rebuild, reinstall units, restart
+./scripts/run.sh           # foreground, Ctrl+C to quit - stops the service and unbinds fbcon
 ```
 
 The clock face is a **generated font**. LVGL ships Montserrat only up to

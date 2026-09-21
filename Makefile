@@ -45,7 +45,7 @@ clean:
 
 # Logic checked without LVGL or a panel.
 test:
-	@$(CC) -Wall -Wextra -I. -o /tmp/sched_test test_sched.c && /tmp/sched_test
-	@$(CC) -Wall -Wextra -I. -o /tmp/touch_test test_touch.c && /tmp/touch_test
+	@$(CC) -Wall -Wextra -I. -o /tmp/sched_test tests/test_sched.c && /tmp/sched_test
+	@$(CC) -Wall -Wextra -I. -o /tmp/touch_test tests/test_touch.c && /tmp/touch_test
 
 .PHONY: clean test
