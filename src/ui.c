@@ -62,9 +62,12 @@
  * the body grows the cards rather than opening one large hole above the
  * week strip. */
 #define CARD_GAP  16
-#define STATUS_H  168
-#define BTNS_H    128
-#define CLOCK_H   132
+/* The stack sums to exactly BODY_H - change one and change another. The
+ * clock takes the space: at arm's length across a room the time is the
+ * thing being read, and 40px was not carrying that far. */
+#define STATUS_H  144
+#define BTNS_H    108
+#define CLOCK_H   176
 #define WEEK_H    200
 #define STATUS_Y  0
 #define BTNS_Y    (STATUS_H + CARD_GAP)
@@ -1289,9 +1292,18 @@ static void build_home(lv_obj_t *s)
 
     card_status = box(s, RIGHT_X, STATUS_Y, RIGHT_W, STATUS_H, C_SURF1, 20);
     status_dot     = dot(card_status, 14, C_OK_FILL);
-    lv_obj_set_pos(status_dot, 32, 47);
-    lbl_status     = text(card_status, 62, 30, "", &lv_font_montserrat_32, C_TEXT);
-    lbl_status_sub = text(card_status, 62, 88, "", &lv_font_montserrat_24, C_TEXT2);
+    lbl_status     = text(card_status, 0, 0, "", &lv_font_montserrat_32, C_TEXT);
+    lbl_status_sub = text(card_status, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
+    /* Centred off the fonts' own line heights rather than measured by eye,
+     * so changing a size does not silently leave the block off-centre. */
+    {
+        int h1 = lv_font_get_line_height(&lv_font_montserrat_32);
+        int h2 = lv_font_get_line_height(&lv_font_montserrat_24);
+        int blk = h1 + 10 + h2;
+        lv_obj_align(lbl_status,     LV_ALIGN_LEFT_MID, 62, -(blk - h1) / 2);
+        lv_obj_align(lbl_status_sub, LV_ALIGN_LEFT_MID, 62,  (blk - h2) / 2);
+        lv_obj_align(status_dot,     LV_ALIGN_LEFT_MID, 32, -(blk - h1) / 2);
+    }
 
     int bw = BTN_W;
     btn_dose = flat_btn(s);
@@ -1347,29 +1359,46 @@ static void build_home(lv_obj_t *s)
     /* Clock and weather share one card in the gap between the buttons and
      * the week strip: time and date left, conditions right. */
     lv_obj_t *ck = box(s, RIGHT_X, CLOCK_Y, RIGHT_W, CLOCK_H, C_SURF1, 20);
-    lbl_home_clock = text(ck, 28, 18, "", &lv_font_montserrat_40, C_TEXT);
-    lbl_home_date  = text(ck, 28, 76, "", &lv_font_montserrat_20, C_TEXT2);
+    lbl_home_clock = text(ck, 0, 0, "", &lv_font_montserrat_48, C_TEXT);
+    lbl_home_date  = text(ck, 0, 0, "", &lv_font_montserrat_20, C_TEXT2);
+    {
+        int hc = lv_font_get_line_height(&lv_font_montserrat_48);
+        int hd = lv_font_get_line_height(&lv_font_montserrat_20);
+        int blk = hc + 6 + hd;
+        lv_obj_align(lbl_home_clock, LV_ALIGN_LEFT_MID, 28, -(blk - hc) / 2);
+        lv_obj_align(lbl_home_date,  LV_ALIGN_LEFT_MID, 28,  (blk - hd) / 2);
+    }
 
     wx_img = lv_img_create(ck);
     lv_obj_align(wx_img, LV_ALIGN_RIGHT_MID, -26, 0);
 
     lbl_wx_temp = text(ck, 0, 0, "", &lv_font_montserrat_32, C_TEXT);
-    lv_obj_align(lbl_wx_temp, LV_ALIGN_RIGHT_MID, -100, -16);
     lbl_wx_desc = text(ck, 0, 0, "", &lv_font_montserrat_20, C_TEXT2);
-    lv_obj_align(lbl_wx_desc, LV_ALIGN_RIGHT_MID, -100, 20);
+    {
+        int ht = lv_font_get_line_height(&lv_font_montserrat_32);
+        int hw = lv_font_get_line_height(&lv_font_montserrat_20);
+        int blk = ht + 4 + hw;
+        lv_obj_align(lbl_wx_temp, LV_ALIGN_RIGHT_MID, -100, -(blk - ht) / 2);
+        lv_obj_align(lbl_wx_desc, LV_ALIGN_RIGHT_MID, -100,  (blk - hw) / 2);
+    }
 
     lv_obj_t *wk = box(s, RIGHT_X, WEEK_Y, RIGHT_W, WEEK_H, C_SURF1, 20);
     card_week = wk;
-    text(wk, 30, 22, "This week", &lv_font_montserrat_20, C_TEXT2);
+    /* header, weekday row, day cells - centred as one block. */
+    int hh = lv_font_get_line_height(&lv_font_montserrat_20);
+    int wk_top = (WEEK_H - (hh + 16 + hh + 6 + 62)) / 2;
+    int wd_y   = wk_top + hh + 16;
+    int cell_y = wd_y + hh + 6;
+    text(wk, 30, wk_top, "This week", &lv_font_montserrat_20, C_TEXT2);
     lbl_week_no = text(wk, 0, 0, "", &lv_font_montserrat_20, C_MUTED);
-    lv_obj_align(lbl_week_no, LV_ALIGN_TOP_RIGHT, -30, 22);
+    lv_obj_align(lbl_week_no, LV_ALIGN_TOP_RIGHT, -30, wk_top);
     int step = (RIGHT_W - 60) / 7;
     for (int i = 0; i < 7; i++) {
         int x = 30 + i * step;
-        week_wd[i] = text(wk, x, 66, "", &lv_font_montserrat_20, C_MUTED);
+        week_wd[i] = text(wk, x, wd_y, "", &lv_font_montserrat_20, C_MUTED);
         lv_obj_set_width(week_wd[i], step - 8);
         lv_obj_set_style_text_align(week_wd[i], LV_TEXT_ALIGN_CENTER, 0);
-        daycell_create(&week_cell[i], wk, x + (step - 8 - 62) / 2, 96, 62,
+        daycell_create(&week_cell[i], wk, x + (step - 8 - 62) / 2, cell_y, 62,
                        &lv_font_montserrat_24);
     }
 }
@@ -1420,10 +1449,14 @@ static void build_transit(lv_obj_t *s)
     card_transit = box(s, RIGHT_X, WEEK_Y, RIGHT_W, WEEK_H, C_SURF1, 20);
     lv_obj_add_flag(card_transit, LV_OBJ_FLAG_HIDDEN);
 
-    text(card_transit, 30, 16, "Varnhem " LV_SYMBOL_RIGHT " Scheeleparken",
+    int hh = lv_font_get_line_height(&lv_font_montserrat_20);
+    int ht = lv_font_get_line_height(&lv_font_montserrat_24);
+    int top = (WEEK_H - (hh + 16 + (SHOW_TRIPS - 1) * 42 + ht)) / 2;
+    text(card_transit, 30, top, "Varnhem " LV_SYMBOL_RIGHT " Scheeleparken",
          &lv_font_montserrat_20, C_TEXT2);
     for (int i = 0; i < SHOW_TRIPS; i++)
-        lbl_trip[i] = text(card_transit, 30, 54 + i * 42, "", &lv_font_montserrat_24, C_TEXT);
+        lbl_trip[i] = text(card_transit, 30, top + hh + 16 + i * 42, "",
+                           &lv_font_montserrat_24, C_TEXT);
 }
 
 static void build_calendar(lv_obj_t *s)
