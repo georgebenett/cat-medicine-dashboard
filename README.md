@@ -42,12 +42,18 @@ straight to the framebuffer - no X, no Wayland, no browser.
   switch shows up here within a second, and a room whose bulbs have
   dropped off the Zigbee mesh says *unreachable* and disables its controls
   instead of accepting taps that do nothing.
+  A button along the bottom arms the **daylight automation** (below) and
+  says what it is actually doing, not just whether it is switched on.
 - **Settings** - backlight, night dim, which weekdays are medicine days, a
   reminder toggle, and buttons to export or reset the log.
 
 Navigation is a left icon rail, hidden by default. Tap the grip on the
 left edge to bring it in; tap the rail anywhere that is not an icon to put
 it away. It also hides after 30 seconds, or as soon as you pick a screen.
+
+Every screen except Today returns to Today after 30 seconds untouched, so
+whoever next walks past the panel finds the dose status on it rather than
+whatever was left open.
 
 Two extras earn their place on the home screen: the **weather** card says
 when it will next rain rather than what it is doing now, and on weekday
@@ -273,6 +279,53 @@ Stale data is handled rather than hidden: weather older than three hours is
 greyed out, and a departure board older than 15 minutes is replaced by the
 week strip. A stale departure board is worse than none.
 
+### Daylight automation
+
+Optional, off until the button on the Lights screen arms it. It keeps one
+room lit across the day: daylight-white and ramping up when the window
+opens, brightest at sunset, warm and dim by the time it closes.
+
+```
+07:00  ramp to 80% over 30 min, 5000K
+ ...   climbing, warming
+19:12  sunset -> 100%, 3200K          <- anchored to the real sunset
+22:00  35%, 3200K, then off
+```
+
+Three decisions worth knowing about:
+
+**Sunset, not a clock hour.** Malmo runs from a 16:37 sunset in December to
+21:55 in June. A fixed-hour curve would be warming the hallway at lunchtime
+in winter and still cold at bedtime in summer. Sunrise and sunset come from
+the same Open-Meteo call `weather.py` already makes - no second API, and no
+almanac table to go stale. If `weather.txt` is missing them the curve falls
+back to the midpoint of the window; a stale file is used as-is, because
+sunset moves about two minutes a day.
+
+**Brightness peaks at sunset, not at noon.** Indoors the hour before sunset
+is the darkest part of the useful day - until then the windows are doing
+half the work - so a flat daytime level is either too dim at dusk or
+wasteful at midday.
+
+**Touching a light hands the room back to you** until the window next
+opens. Re-imposing a curve two minutes after someone reaches for a switch
+is what makes people tear these out. Switching the automation off and on
+again overrides that and takes the room back immediately.
+
+Long days opt out entirely: above `hue_auto_skip_daylen` hours of daylight
+the room is lit by its own window, which sits out roughly May to early
+August here. The button says which of these it is - *on*, *idle, long day*,
+*you took over*, *outside hours* - because enabled and doing nothing
+otherwise looks identical to broken.
+
+Colour is interpolated in **mireks, not kelvin**: mireks are the
+perceptually even unit, so a straight line between two of them looks like a
+straight fade. The same line in kelvin crawls at the warm end and races at
+the cool one.
+
+`./hue.py --selftest` checks the curve against real Malmo solstice and
+equinox times without needing a bridge.
+
 ### Backlight
 
 Held dark from the first line of `main()` and by `cat-dim.service`, which
@@ -341,11 +394,16 @@ Things that cost real debugging time, kept here so they cost it once:
 ## Development
 
 ```sh
-make            # build
-make test       # date/schedule maths and the touch latch, no panel needed
-./deploy.sh     # pull, rebuild, reinstall units, restart
-./run.sh        # foreground, Ctrl+C to quit - stops the service and unbinds fbcon
+make               # build
+make test          # date/schedule maths and the touch latch, no panel needed
+./hue.py --selftest  # the daylight curve, no bridge needed
+./deploy.sh        # pull, rebuild, reinstall units, restart
+./run.sh           # foreground, Ctrl+C to quit - stops the service and unbinds fbcon
 ```
+
+The clock face is a **generated font**. LVGL ships Montserrat only up to
+48px, so `src/font_clock_60.c` is a 60px cut containing digits and `:`
+alone - the header in that file has the command to regenerate it.
 
 Two things paint into `/dev/fb0` besides the app: the service itself, and
 **fbcon**, the kernel console - `console=tty1` is why kernel messages land

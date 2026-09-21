@@ -12,6 +12,10 @@
  */
 #include "ui.h"
 #include "sched.h"
+
+/* 60px clock face: bigger than LVGL ships Montserrat, so it is generated
+ * into src/font_clock_60.c - digits and colon only. */
+LV_FONT_DECLARE(font_clock_60);
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1359,10 +1363,10 @@ static void build_home(lv_obj_t *s)
     /* Clock and weather share one card in the gap between the buttons and
      * the week strip: time and date left, conditions right. */
     lv_obj_t *ck = box(s, RIGHT_X, CLOCK_Y, RIGHT_W, CLOCK_H, C_SURF1, 20);
-    lbl_home_clock = text(ck, 0, 0, "", &lv_font_montserrat_48, C_TEXT);
+    lbl_home_clock = text(ck, 0, 0, "", &font_clock_60, C_TEXT);
     lbl_home_date  = text(ck, 0, 0, "", &lv_font_montserrat_20, C_TEXT2);
     {
-        int hc = lv_font_get_line_height(&lv_font_montserrat_48);
+        int hc = lv_font_get_line_height(&font_clock_60);
         int hd = lv_font_get_line_height(&lv_font_montserrat_20);
         int blk = hc + 6 + hd;
         lv_obj_align(lbl_home_clock, LV_ALIGN_LEFT_MID, 28, -(blk - hc) / 2);
