@@ -311,8 +311,12 @@ wasteful at midday.
 
 **Touching a light hands the room back to you** until the window next
 opens. Re-imposing a curve two minutes after someone reaches for a switch
-is what makes people tear these out. Switching the automation off and on
-again overrides that and takes the room back immediately.
+is what makes people tear these out. That applies however the light was
+changed - the panel, the Hue app, a wall switch, a voice assistant. The
+panel's own commands are seen directly; everything else is caught by the
+room no longer being where the automation left it. Switching the
+automation off and on again overrides that and takes the room back
+immediately.
 
 Long days opt out entirely: above `hue_auto_skip_daylen` hours of daylight
 the room is lit by its own window, which sits out roughly May to early

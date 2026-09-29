@@ -30,6 +30,7 @@ os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 
 POLL = 2.0          # on/off + brightness; the bridge is on the LAN, this is cheap
 STRUCT_EVERY = 30.0 # rooms, bulb membership, mesh health - all near-static
+AUTO_SETTLE = 25.0  # bulbs fade after a write; readings before this are noise
 AUTO_EVERY = 10.0   # the curve crawls, but the panel's "why" label should not
                     # lag a minute behind reality; the diff guard in auto_run
                     # keeps this from turning into bridge traffic
@@ -342,6 +343,32 @@ def auto_run(rs, a, state):
         AUTO_STATUS['why'] = 'manual'
         return False
 
+    # Someone reaching for a phone, a wall switch or a voice assistant talks
+    # straight to the bridge, so the only evidence is the room no longer
+    # being where we left it. Treat that exactly like a press on the panel:
+    # back off. Not doing this is the version of the bug where the light you
+    # just switched off comes back on a minute later.
+    was = state.get('applied')
+    if was and time.monotonic() - state.get('applied_at', 0) > AUTO_SETTLE:
+        now_on, now_bri = rs[idx]['on'], rs[idx]['bri']
+        # Brightness alone is noisy - bulbs round, and a group averages -
+        # so only an on/off flip or a move bigger than our own write
+        # threshold counts as somebody else's doing.
+        if now_on != was[0] or (now_on and abs(now_bri - was[1]) > 5):
+            nxt = datetime.now().replace(hour=a['from'] // 60, minute=a['from'] % 60,
+                                         second=0, microsecond=0)
+            if nxt <= datetime.now():
+                nxt += timedelta(days=1)
+            state['resume'] = nxt
+            state['applied'] = None
+            AUTO_STATUS['why'] = 'manual'
+            print("auto: %s changed elsewhere (%s %d%%, expected %s %d%%) - "
+                  "standing down until %s" % (rs[idx]['name'],
+                  'on' if now_on else 'off', now_bri,
+                  'on' if was[0] else 'off', was[1], nxt.strftime('%H:%M %d %b')),
+                  flush=True)
+            return False
+
     sunrise, sunset = solar()
     want = auto_target(mins, sunrise, sunset, a)
     inside = want is not None
@@ -356,6 +383,8 @@ def auto_run(rs, a, state):
     # the light is yours.
     if state['inside'] and not inside and mins >= a['to']:
         api('grouped_light/%s' % rs[idx]['gid'], 'PUT', {'on': {'on': False}})
+        state['applied'] = (0, 0)
+        state['applied_at'] = time.monotonic()
         state['inside'] = False
         print("auto: window closed, %s off" % rs[idx]['name'], flush=True)
         return True
@@ -376,6 +405,8 @@ def auto_run(rs, a, state):
         body['color_temperature'] = {'mirek': max(rs[idx]['lo'], min(rs[idx]['hi'], mirek))}
     api('grouped_light/%s' % rs[idx]['gid'], 'PUT', body)
     rs[idx]['mirek'] = mirek          # same reason as in apply()
+    state['applied'] = (1, bri)
+    state['applied_at'] = time.monotonic()
     print("auto: %s -> %d%% %dK" % (rs[idx]['name'], bri, 1000000 // mirek), flush=True)
     return True
 
@@ -485,7 +516,8 @@ def main():
 
     rs, last_poll, last_struct, last_auto, last_cfg = [], 0.0, 0.0, 0.0, 0.0
     a = auto_cfg()
-    auto_state = {'inside': False, 'resume': None, 'was_on': bool(a['on'])}
+    auto_state = {'inside': False, 'resume': None, 'was_on': bool(a['on']),
+                  'applied': None, 'applied_at': 0.0}
     while True:
         now = time.monotonic()
 
@@ -550,6 +582,7 @@ def main():
                 if auto_state['resume']:
                     print("auto: re-armed, dropping the manual override", flush=True)
                 auto_state['resume'] = None
+                auto_state['applied'] = None   # no stale expectation to diverge from
                 last_auto = 0.0          # act now, not at the next minute
             auto_state['was_on'] = bool(a['on'])
 
