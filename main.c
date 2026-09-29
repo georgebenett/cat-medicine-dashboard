@@ -154,9 +154,14 @@ static void backlight_find(void)
 
 static void backlight_set_raw(int v)
 {
+    static int last = -1;
     if (!bl_path[0] || bl_max <= 0) return;
     if (v < 1) v = 1;
     if (v > bl_max) v = bl_max;
+    /* A fade steps tens of times a second and mostly lands on the same raw
+     * value twice running; every one of those was an open/write/close. */
+    if (v == last) return;
+    last = v;
     FILE *f = fopen(bl_path, "w");
     if (!f) { perror("backlight write"); return; }
     fprintf(f, "%d\n", v);

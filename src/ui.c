@@ -107,6 +107,8 @@ static int  dimmed;                                      /* inside that window n
 static int  dim_pct = 15;                                /* idle level, not off */
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
+static int  bl_auto;                   /* panel follows the hallway lamp */
+#define BL_AUTO_MIN 5                  /* a dark hallway still leaves it readable */
 static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these */
 static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
@@ -220,6 +222,7 @@ static void cfg_load(void)
         else if (!strcmp(k, "quiet_to"))   { int h = atoi(v); if (h >= 0 && h < 24) quiet_to = h; }
         else if (!strcmp(k, "dim_pct"))    { int p = atoi(v); if (p >= 5 && p <= 60) dim_pct = p; }
         else if (!strcmp(k, "backlight"))  { int b = atoi(v); if (b >= 5 && b <= 100) backlight_pct = b; }
+        else if (!strcmp(k, "bl_auto"))    bl_auto = atoi(v);
         else if (!strcmp(k, "lat"))        snprintf(cfg_lat, sizeof cfg_lat, "%s", v);
         else if (!strcmp(k, "lon"))        snprintf(cfg_lon, sizeof cfg_lon, "%s", v);
         else if (!strcmp(k, "hue_auto"))     hue_auto = atoi(v);
@@ -248,7 +251,7 @@ static int cfg_owned(const char *k)
         "reminder", "reminder_h", "reminder_m", "lat", "lon",
         "transit_key", "transit_from", "transit_to",
         "transit_start", "transit_end", "transit_lead", "rain_pct",
-        "hue_auto",
+        "hue_auto", "bl_auto",
     };
     for (unsigned i = 0; i < sizeof owned / sizeof owned[0]; i++)
         if (!strcmp(k, owned[i])) return 1;
@@ -288,13 +291,13 @@ static void cfg_save(void)
                "reminder=%d\nreminder_h=%d\nreminder_m=%d\nlat=%s\nlon=%s\n"
                "transit_key=%s\ntransit_from=%s\ntransit_to=%s\n"
                "transit_start=%02d:%02d\ntransit_end=%02d:%02d\ntransit_lead=%d\n"
-               "rain_pct=%d\nhue_auto=%d\n%s",
+               "rain_pct=%d\nhue_auto=%d\nbl_auto=%d\n%s",
             med_mask, cat_name, quiet_from, quiet_to, dim_pct, backlight_pct,
             reminder_on, reminder_h, reminder_m, cfg_lat, cfg_lon,
             cfg_tkey, cfg_tfrom, cfg_tto,
             transit_start / 60, transit_start % 60,
             transit_end / 60, transit_end % 60, transit_lead, rain_pct,
-            hue_auto, keep);
+            hue_auto, bl_auto, keep);
     fclose(f);
 }
 
@@ -547,6 +550,60 @@ static void hue_send(int idx)
 
 static int hue_ok(void) { return hue_updated && (long)time(NULL) - hue_updated < 30; }
 
+/* --- automatic backlight --------------------------------------------
+ *
+ * The panel hangs on the same wall as the hallway lamp, so the lamp is a
+ * better proxy for "how much light is in this room" than any clock. A
+ * screen at full brightness in a dark hallway is the thing that gets
+ * noticed at 2am; one at 5% in daylight is unreadable.
+ */
+
+static int bl_follow_room(void)
+{
+    if (!auto_room[0]) return -1;
+    for (int i = 0; i < n_rooms; i++)
+        if (!strcasecmp(rooms[i].name, auto_room)) return i;
+    return -1;
+}
+
+/* The one place that decides how bright the panel should be. */
+static int backlight_target(const struct tm *t)
+{
+    int awake = backlight_pct;
+
+    if (bl_auto) {
+        int i = bl_follow_room();
+        /* An unreachable room tells us nothing about the room's light, so
+         * fall back to the slider rather than guessing dark. */
+        if (i >= 0 && rooms[i].reachable) {
+            awake = rooms[i].on ? rooms[i].bri : 0;
+            if (awake < BL_AUTO_MIN) awake = BL_AUTO_MIN;
+        }
+    }
+
+    if (sched_in_window(t->tm_hour * 60 + t->tm_min, quiet_from * 60, quiet_to * 60))
+        return dim_pct < awake ? dim_pct : awake;   /* night: never dim *up* */
+    return awake;
+}
+
+/* Stepped from the main loop, not the 1Hz tick, so a change eases in over
+ * about a second instead of jumping. */
+static int      bl_now = -1, bl_want = -1;
+static uint32_t bl_stepped;
+
+static void backlight_ramp(void)
+{
+    if (bl_want < 0 || bl_now == bl_want) return;
+    uint32_t now = lv_tick_get();
+    if (now - bl_stepped < 25) return;
+    bl_stepped = now;
+    int step = 3;
+    if (bl_now < bl_want) bl_now = bl_now + step > bl_want ? bl_want : bl_now + step;
+    else                  bl_now = bl_now - step < bl_want ? bl_want : bl_now - step;
+    ui_backlight_apply(bl_now);
+}
+
+
 /* Minutes from now until "HH:MM", negative if it has been and gone. */
 static int mins_until(const char *hhmm, const struct tm *t)
 {
@@ -677,6 +734,7 @@ static time_t    rail_shown_at;
 static lv_obj_t *lbl_stat_month, *lbl_stat_streak, *lbl_stat_events, *lbl_recent;
 static lv_obj_t *lbl_bl_val, *sld_dim, *lbl_dim_val, *day_pill[7], *sw_reminder;
 static lv_obj_t *lbl_reminder, *lbl_footer, *lbl_toast;
+static lv_obj_t *sw_blauto, *lbl_blauto;
 static struct {
     lv_obj_t *card, *ico, *name, *sld, *val, *val_ct;
 } room_row[MAX_ROOMS];
@@ -938,6 +996,14 @@ static void day_pill_cb(lv_event_t *e)
 static void backlight_label(int pct) { lv_label_set_text_fmt(lbl_bl_val, "%d%%", pct); }
 
 static void dim_label(int pct) { lv_label_set_text_fmt(lbl_dim_val, "%d%%", pct); }
+
+static void blauto_cb(lv_event_t *e)
+{
+    bl_auto = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    cfg_save();
+    /* The slider keeps its own value; auto just stops consulting it. */
+    toast(bl_auto ? "Panel follows the hallway lamp" : "Manual brightness");
+}
 
 static void backlight_cb(lv_event_t *e)
 {
@@ -1521,7 +1587,7 @@ static void build_calendar(lv_obj_t *s)
 }
 
 #define SET_RH   112
-#define SET_ROWS 4
+#define SET_ROWS 5
 
 static lv_obj_t *settings_group;
 
@@ -1957,7 +2023,16 @@ static void build_settings(lv_obj_t *s)
         day_pill[i] = p;
     }
 
-    r = settings_row(3, LV_SYMBOL_BELL, "Reminder");
+    r = settings_row(3, LV_SYMBOL_IMAGE, "Auto brightness");
+    lbl_blauto = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
+    lv_obj_align(lbl_blauto, LV_ALIGN_LEFT_MID, VX, 0);
+    sw_blauto = lv_switch_create(r);
+    lv_obj_set_size(sw_blauto, 84, 44);
+    lv_obj_align(sw_blauto, LV_ALIGN_RIGHT_MID, -28, 0);
+    lv_obj_set_style_bg_color(sw_blauto, lv_color_hex(C_OK_FILL), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sw_blauto, blauto_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    r = settings_row(4, LV_SYMBOL_BELL, "Reminder");
     lbl_reminder = text(r, 0, 0, "", &lv_font_montserrat_24, C_TEXT2);
     lv_obj_align(lbl_reminder, LV_ALIGN_LEFT_MID, VX, 0);
     sw_reminder = lv_switch_create(r);
@@ -2212,6 +2287,23 @@ static void refresh_settings(const struct tm *t)
                                     lv_color_hex(on ? C_ACC_ON : C_TEXT2), 0);
     }
 
+    /* Say what it is following and where that has it right now, so the
+     * switch is not just on/off with no visible consequence. */
+    if (!bl_auto) {
+        lv_label_set_text(lbl_blauto, "off " LV_SYMBOL_BULLET " slider above sets it");
+    } else {
+        int i = bl_follow_room();
+        if (i < 0 || !rooms[i].reachable)
+            lv_label_set_text_fmt(lbl_blauto, "%s unreachable " LV_SYMBOL_BULLET " using the slider",
+                                  auto_room[0] ? auto_room : "lamp");
+        else
+            lv_label_set_text_fmt(lbl_blauto, "%s at %d%% " LV_SYMBOL_BULLET " panel %d%%",
+                                  rooms[i].name, rooms[i].on ? rooms[i].bri : 0,
+                                  bl_now < 0 ? 0 : bl_now);
+    }
+    if (bl_auto) lv_obj_add_state(sw_blauto, LV_STATE_CHECKED);
+    else         lv_obj_clear_state(sw_blauto, LV_STATE_CHECKED);
+
     lv_label_set_text_fmt(lbl_reminder, "%02d:%02d " LV_SYMBOL_BULLET " flash screen until logged",
                           reminder_h, reminder_m);
     if (reminder_on) lv_obj_add_state(sw_reminder, LV_STATE_CHECKED);
@@ -2293,6 +2385,8 @@ void ui_tick(void)
     static time_t last_sec;
     static int last_yday = -1, last_min = -1;
 
+    backlight_ramp();                        /* every pass: this is the fade */
+
     time_t now = time(NULL);
     if (now == last_sec) return;             /* the loop runs at ~200Hz; this needs 1Hz */
     /* The Pi has no RTC, so at boot the clock is whatever was saved at
@@ -2317,18 +2411,15 @@ void ui_tick(void)
 
     /* Dim by the clock, not by idleness. An idle timer put the panel to
      * sleep in the middle of the day, which is exactly when an unlogged
-     * dose most needs to catch someone's eye. */
-    {
-        int night = sched_in_window(t.tm_hour * 60 + t.tm_min,
-                                    quiet_from * 60, quiet_to * 60);
-        if (night != dimmed) {
-            int awake = (int)lv_slider_get_value(ui_backlight_slider);
-            /* Never dim *up*: if the slider sits below dim_pct, keep it. */
-            int low = dim_pct < awake ? dim_pct : awake;
-            dimmed = night;
-            ui_backlight_apply(night ? low : awake);
-        }
-    }
+     * dose most needs to catch someone's eye. Auto mode adds the hallway
+     * lamp on top of that; backlight_target() is the single decision and
+     * the ramp above eases the panel towards it. */
+    dimmed = sched_in_window(t.tm_hour * 60 + t.tm_min, quiet_from * 60, quiet_to * 60);
+    /* Auto mode needs the lamp's state wherever we are, not only while the
+     * Lights screen is up. */
+    if (bl_auto && cur_screen != 2) hue_load();
+    bl_want = backlight_target(&t);
+    if (bl_now < 0) { bl_now = bl_want; ui_backlight_apply(bl_now); }
 
     /* Without seconds nothing on screen changes faster than once a minute,
      * so the only per-second work left is the overdue pulse. The clock is

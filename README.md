@@ -44,8 +44,9 @@ straight to the framebuffer - no X, no Wayland, no browser.
   instead of accepting taps that do nothing.
   A button along the bottom arms the **daylight automation** (below) and
   says what it is actually doing, not just whether it is switched on.
-- **Settings** - backlight, night dim, which weekdays are medicine days, a
-  reminder toggle, and buttons to export or reset the log.
+- **Settings** - backlight, night dim, which weekdays are medicine days,
+  auto brightness, a reminder toggle, and buttons to export or reset the
+  log.
 
 Navigation is a left icon rail, hidden by default. Tap the grip on the
 left edge to bring it in; tap the rail anywhere that is not an icon to put
@@ -169,6 +170,7 @@ from the Settings screen except where noted:
 days=42                medicine-day bitmask, bit0=Sunday. Default Mon/Wed/Fri
 name=Kim
 backlight=50           remembered brightness, restored at startup
+bl_auto=0              panel brightness follows the hallway lamp
 quiet_from=23          night dim starts (hour)
 quiet_to=5             night dim ends (hour)
 dim_pct=15             night brightness, never above the awake one
@@ -337,6 +339,23 @@ Dimming is by the clock, not by idleness. An idle timer used to put the
 panel to sleep in the middle of the day, which is exactly when an unlogged
 dose most needs to catch someone's eye. It never dims *up*: if the slider
 sits below `dim_pct`, that lower value is used.
+
+### Auto brightness
+
+Optional, off by default. The panel hangs on the same wall as the hallway
+lamp, so the lamp is a better proxy for how much light is in the room than
+any clock: with it on the panel tracks the lamp one-to-one, and follows it
+down to a 5% floor when the lamp is off or dimmed. It reads the same
+`hue.txt` the Lights screen does, so it costs no extra bridge traffic.
+
+Night dim still wins inside the quiet window, and it never dims *up* -
+whichever of the two is lower is what the panel gets. If the room is
+unreachable the panel falls back to the slider rather than guessing dark,
+and the Settings row says which of those is happening.
+
+Changes ease in over about a second rather than stepping, which is why
+`backlight_set_raw()` skips writes that would not change the value - a
+fade otherwise wrote sysfs tens of times a second.
 
 ### Power
 
