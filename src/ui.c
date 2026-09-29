@@ -1677,6 +1677,7 @@ static void ct_preset_cb(lv_event_t *e)
 #define AUTO_BAR_H 64
 #define AUTO_BAR_Y (BODY_H - AUTO_BAR_H)
 #define LIGHTS_H   (BODY_H - AUTO_BAR_H - CARD_GAP)
+#define ROOM_OFF_PCT 2   /* slider values at or below this mean off */
 #define ROW_SLD_X  400
 #define ROW_SLD_W  540
 #define ROW_VAL_X  980
@@ -1741,8 +1742,17 @@ static void room_sld_save_cb(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     if (i >= n_rooms || !rooms[i].reachable) return;
-    /* Dragging a dark room up is how you turn it on; no second tap. */
-    if (rooms[i].bri > 0 && !rooms[i].on) rooms[i].on = 1;
+    /* The slider is the switch at both ends: dragging a dark room up turns
+     * it on, dragging it to zero turns it off. A room "on at 0%" is off
+     * with extra steps, and the bridge treats a dimming of 0 as no
+     * instruction at all - so it would stay lit at the old level and the
+     * knob would spring back to it on the next poll. */
+    /* The bottom of the track is an off zone, not a 1% zone. Exactly 0 sits
+     * on the very left edge, so a finger that "slides it off" habitually
+     * stops a pixel or two short and leaves a lamp lit at a level nobody
+     * can see but which still reads as on. */
+    rooms[i].on = rooms[i].bri > ROOM_OFF_PCT;
+    if (!rooms[i].on) rooms[i].bri = 0;
     hue_send(i);
     refresh_lights();
 }
