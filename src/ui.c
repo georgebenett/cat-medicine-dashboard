@@ -108,8 +108,8 @@ static int  dim_pct = 15;                                /* idle level, not off 
 static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
 static int  bl_auto;                   /* panel follows the hallway lamp */
-#define BL_AUTO_MIN 5                  /* a dark hallway still leaves it readable */
-#define BL_NIGHT_MIN 1                 /* ...except in the small hours, when nobody is reading it */
+#define BL_AUTO_MIN 5                  /* percent: a dark hallway still leaves it readable */
+#define BL_NIGHT_RAW 1                 /* ...except in the small hours: the panel's bottom step */
 static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these */
 static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
@@ -559,6 +559,12 @@ static int hue_ok(void) { return hue_updated && (long)time(NULL) - hue_updated <
  * noticed at 2am; one at 5% in daylight is unreadable.
  */
 
+/* Percentages are what the config stores and what the UI shows; raw is
+ * what the panel takes and what everything below here works in. */
+static int bl_raw_max(void) { int m = ui_backlight_raw_max(); return m > 0 ? m : 255; }
+static int pct_to_raw(int pct) { return pct * bl_raw_max() / 100; }
+static int raw_to_pct(int raw) { int m = bl_raw_max(); return (raw * 100 + m / 2) / m; }
+
 static int bl_follow_room(void)
 {
     if (!auto_room[0]) return -1;
@@ -572,26 +578,28 @@ static int backlight_target(const struct tm *t)
 {
     int night = sched_in_window(t->tm_hour * 60 + t->tm_min,
                                 quiet_from * 60, quiet_to * 60);
-    int awake = backlight_pct;
+    int raw = pct_to_raw(backlight_pct);
 
     if (bl_auto) {
         int i = bl_follow_room();
         /* An unreachable room tells us nothing about the room's light, so
          * fall back to the slider rather than guessing dark. */
         if (i >= 0 && rooms[i].reachable) {
-            awake = rooms[i].on ? rooms[i].bri : 0;
+            raw = rooms[i].on ? pct_to_raw(rooms[i].bri) : 0;
             /* A dark room in the small hours is the one case where the
              * panel may go below readable: the lamp is off and the house
              * is asleep, so a glow is all that is wanted. Any light in the
              * room at all, at any hour, keeps the normal floor. */
-            int floor = (!rooms[i].on && night) ? BL_NIGHT_MIN : BL_AUTO_MIN;
-            if (awake < floor) awake = floor;
+            int floor = (!rooms[i].on && night) ? BL_NIGHT_RAW : pct_to_raw(BL_AUTO_MIN);
+            if (raw < floor) raw = floor;
         }
     }
 
-    if (night)
-        return dim_pct < awake ? dim_pct : awake;   /* night: never dim *up* */
-    return awake;
+    if (night) {                                   /* night: never dim *up* */
+        int d = pct_to_raw(dim_pct);
+        return d < raw ? d : raw;
+    }
+    return raw;
 }
 
 /* Stepped from the main loop, not the 1Hz tick, so a change eases in over
@@ -605,10 +613,12 @@ static void backlight_ramp(void)
     uint32_t now = lv_tick_get();
     if (now - bl_stepped < 25) return;
     bl_stepped = now;
-    int step = 3;
+    /* Raw steps, so the fade is as fine near the bottom as at the top -
+     * which is the whole reason this is not in percent. */
+    int step = 4;
     if (bl_now < bl_want) bl_now = bl_now + step > bl_want ? bl_want : bl_now + step;
     else                  bl_now = bl_now - step < bl_want ? bl_want : bl_now - step;
-    ui_backlight_apply(bl_now);
+    ui_backlight_set_raw(bl_now);
 }
 
 
@@ -1016,8 +1026,8 @@ static void blauto_cb(lv_event_t *e)
 static void backlight_cb(lv_event_t *e)
 {
     int pct = (int)lv_slider_get_value(lv_event_get_target(e));
-    ui_backlight_apply(pct);
-    bl_now = pct;        /* the ramp must not think it is elsewhere */
+    bl_now = pct_to_raw(pct);
+    ui_backlight_set_raw(bl_now);   /* the ramp must not think it is elsewhere */
     backlight_label(pct);
 }
 
@@ -1035,7 +1045,7 @@ static void dim_cb(lv_event_t *e)
     dim_label(dim_pct);
     /* Apply live if we are already in the window, so the slider shows what
      * it will actually look like tonight. */
-    if (dimmed) ui_backlight_apply(dim_pct);
+    if (dimmed) { bl_now = pct_to_raw(dim_pct); ui_backlight_set_raw(bl_now); }
 }
 
 /* Saved on release like the backlight slider. Doing it per value change
@@ -2318,7 +2328,7 @@ static void refresh_settings(const struct tm *t)
         else
             lv_label_set_text_fmt(lbl_blauto, "%s at %d%% " LV_SYMBOL_BULLET " panel %d%%",
                                   rooms[i].name, rooms[i].on ? rooms[i].bri : 0,
-                                  bl_now < 0 ? 0 : bl_now);
+                                  bl_now < 0 ? 0 : raw_to_pct(bl_now));
     }
     if (bl_auto) lv_obj_add_state(sw_blauto, LV_STATE_CHECKED);
     else         lv_obj_clear_state(sw_blauto, LV_STATE_CHECKED);
@@ -2392,7 +2402,7 @@ void ui_init(void)
     if (getenv("CAT_POPUP")) lv_obj_clear_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
     if (getenv("CAT_TOAST")) { toast(getenv("CAT_TOAST")); toast_until = 0; }  /* 0 = stays up */
 
-    /* Seed the ramp now so ui_backlight_pct() has the real answer before
+    /* Seed the ramp now so ui_backlight_raw() has the real answer before
      * main() starts its fade, and so the two agree about where the panel
      * is once it finishes. */
     {
@@ -2403,14 +2413,15 @@ void ui_init(void)
 
     /* main.c fades up to this once the UI is built; applying it here would
      * light the panel before there was anything on it. */
-    printf("backlight target %d%% (slider %d%%)\n", bl_now, backlight_pct);
+    printf("backlight target raw %d/%d = %d%% (slider %d%%)\n",
+           bl_now, bl_raw_max(), raw_to_pct(bl_now), backlight_pct);
 }
 
 /* What main() fades up to at boot. It must be the *effective* level, not
  * the slider: the fade lands after the first tick, so returning the slider
  * here overwrote auto mode's decision - and the ramp then saw its own
  * bookkeeping as correct and never put it right. */
-int ui_backlight_pct(void) { return bl_now < 0 ? backlight_pct : bl_now; }
+int ui_backlight_raw(void) { return bl_now < 0 ? pct_to_raw(backlight_pct) : bl_now; }
 
 void ui_tick(void)
 {
@@ -2451,7 +2462,7 @@ void ui_tick(void)
      * Lights screen is up. */
     if (bl_auto && cur_screen != 2) hue_load();
     bl_want = backlight_target(&t);
-    if (bl_now < 0) { bl_now = bl_want; ui_backlight_apply(bl_now); }
+    if (bl_now < 0) { bl_now = bl_want; ui_backlight_set_raw(bl_now); }
 
     /* Without seconds nothing on screen changes faster than once a minute,
      * so the only per-second work left is the overdue pulse. The clock is

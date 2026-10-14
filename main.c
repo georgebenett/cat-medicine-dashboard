@@ -129,12 +129,6 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
 /* --- panel backlight -------------------------------------------------
  * The Waveshare panel MCU exposes a standard sysfs backlight. Found by
  * glob, not hardcoded: the i2c address shows up in the device name. */
-/* Never fully dark - the panel has to stay findable in an unlit hallway -
- * but low enough that the deep-night level below is reachable. Everything
- * the user can set directly still bottoms out at 5: the backlight slider's
- * range starts there and dim_pct is validated to it. */
-#define BL_MIN_PCT 1
-
 static char bl_path[512];
 static int  bl_max;
 
@@ -172,17 +166,10 @@ static void backlight_set_raw(int v)
     fclose(f);
 }
 
-static void backlight_set_pct(int pct)
-{
-    if (pct < BL_MIN_PCT) pct = BL_MIN_PCT;
-    if (pct > 100) pct = 100;
-    backlight_set_raw(pct * bl_max / 100);
-}
-
-/* src/ui.c dims the panel when the display goes idle. Always a percentage
- * now: the near-off level is only used at boot, and that path calls
- * backlight_set_raw() directly from main(). */
-void ui_backlight_apply(int pct) { backlight_set_pct(pct); }
+/* src/ui.c owns the policy and speaks raw; this file owns only the sysfs
+ * write and the "never fully dark" clamp inside backlight_set_raw(). */
+void ui_backlight_set_raw(int raw) { backlight_set_raw(raw); }
+int  ui_backlight_raw_max(void)    { return bl_max; }
 
 static uint32_t millis(void)
 {
@@ -268,8 +255,7 @@ int main(void)
      * sysfs backlight and the loop below is what keeps LVGL drawing while
      * the fade runs. Only written when the value actually changes - at loop
      * speed this would otherwise be a few hundred sysfs writes. */
-    const int fade_to  = ui_backlight_pct();
-    const int fade_top = bl_max > 0 ? bl_max * fade_to / 100 : 0;
+    const int fade_top = ui_backlight_raw();
     const uint32_t fade_ms = 1200;
     uint32_t fade_start = millis();
     int fading = fade_top > 1, last_raw = 1;
@@ -301,9 +287,9 @@ int main(void)
         if (fading) {
             uint32_t el = millis() - fade_start;
             if (el >= fade_ms) {
-                backlight_set_pct(fade_to);
+                backlight_set_raw(fade_top);
                 fading = 0;
-                printf("faded up to %d%%\n", fade_to);
+                printf("faded up to raw %d/%d\n", fade_top, bl_max);
             } else {
                 int raw = 1 + (int)((long)(fade_top - 1) * el / fade_ms);
                 if (raw != last_raw) { backlight_set_raw(raw); last_raw = raw; }

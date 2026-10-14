@@ -355,7 +355,8 @@ down to a 5% floor when the lamp is off or dimmed. It reads the same
 Night dim still wins inside the quiet window, and it never dims *up* -
 whichever of the two is lower is what the panel gets. One case goes lower
 still: a dark room inside the quiet window drops the panel to a bare glow
-(1%, six times dimmer than the daytime floor), because the lamp being off
+(raw 1, the panel's bottom step - twelve times dimmer than the daytime
+floor, and one step above off), because the lamp being off
 at 3am means nobody is reading it. Any light in the room at all, at any
 hour, keeps the normal floor. If the room is
 unreachable the panel falls back to the slider rather than guessing dark,
@@ -364,6 +365,13 @@ and the Settings row says which of those is happening.
 Changes ease in over about a second rather than stepping, which is why
 `backlight_set_raw()` skips writes that would not change the value - a
 fade otherwise wrote sysfs tens of times a second.
+
+Everything below the config and the labels works in **raw** backlight
+units, not percent. Percent cannot express the panel's bottom step (1% of
+255 truncates to 2) and it quantises the fade most coarsely exactly where
+it should be finest - near zero, one percent is two and a half raw steps.
+`cat_cfg.txt` and the UI still speak percent; `src/ui.c` converts at the
+edges.
 
 ### Power
 
