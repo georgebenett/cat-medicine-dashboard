@@ -172,7 +172,7 @@ name=Kim
 backlight=50           remembered brightness, restored at startup
 bl_auto=0              panel brightness follows the hallway lamp
 quiet_from=23          night dim starts (hour)
-quiet_to=5             night dim ends (hour)
+quiet_to=6             night dim ends (hour)
 dim_pct=15             night brightness, never above the awake one
 reminder=1             flash the status card when a dose is overdue
 reminder_h=9           reminder time - no picker in the UI
@@ -353,7 +353,11 @@ down to a 5% floor when the lamp is off or dimmed. It reads the same
 `hue.txt` the Lights screen does, so it costs no extra bridge traffic.
 
 Night dim still wins inside the quiet window, and it never dims *up* -
-whichever of the two is lower is what the panel gets. If the room is
+whichever of the two is lower is what the panel gets. One case goes lower
+still: a dark room inside the quiet window drops the panel to a bare glow
+(1%, six times dimmer than the daytime floor), because the lamp being off
+at 3am means nobody is reading it. Any light in the room at all, at any
+hour, keeps the normal floor. If the room is
 unreachable the panel falls back to the slider rather than guessing dark,
 and the Settings row says which of those is happening.
 

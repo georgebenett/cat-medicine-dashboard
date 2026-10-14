@@ -109,6 +109,7 @@ static int  reminder_on = 1, reminder_h = 9, reminder_m = 0;
 static int  backlight_pct = 50;                          /* remembered across restarts */
 static int  bl_auto;                   /* panel follows the hallway lamp */
 #define BL_AUTO_MIN 5                  /* a dark hallway still leaves it readable */
+#define BL_NIGHT_MIN 1                 /* ...except in the small hours, when nobody is reading it */
 static char cfg_tkey[64]  = "";        /* trafiklab key; transit.py uses these */
 static char cfg_tfrom[64] = "";
 static char cfg_tto[64]   = "";
@@ -569,6 +570,8 @@ static int bl_follow_room(void)
 /* The one place that decides how bright the panel should be. */
 static int backlight_target(const struct tm *t)
 {
+    int night = sched_in_window(t->tm_hour * 60 + t->tm_min,
+                                quiet_from * 60, quiet_to * 60);
     int awake = backlight_pct;
 
     if (bl_auto) {
@@ -577,11 +580,16 @@ static int backlight_target(const struct tm *t)
          * fall back to the slider rather than guessing dark. */
         if (i >= 0 && rooms[i].reachable) {
             awake = rooms[i].on ? rooms[i].bri : 0;
-            if (awake < BL_AUTO_MIN) awake = BL_AUTO_MIN;
+            /* A dark room in the small hours is the one case where the
+             * panel may go below readable: the lamp is off and the house
+             * is asleep, so a glow is all that is wanted. Any light in the
+             * room at all, at any hour, keeps the normal floor. */
+            int floor = (!rooms[i].on && night) ? BL_NIGHT_MIN : BL_AUTO_MIN;
+            if (awake < floor) awake = floor;
         }
     }
 
-    if (sched_in_window(t->tm_hour * 60 + t->tm_min, quiet_from * 60, quiet_to * 60))
+    if (night)
         return dim_pct < awake ? dim_pct : awake;   /* night: never dim *up* */
     return awake;
 }
@@ -1009,6 +1017,7 @@ static void backlight_cb(lv_event_t *e)
 {
     int pct = (int)lv_slider_get_value(lv_event_get_target(e));
     ui_backlight_apply(pct);
+    bl_now = pct;        /* the ramp must not think it is elsewhere */
     backlight_label(pct);
 }
 
@@ -2383,12 +2392,25 @@ void ui_init(void)
     if (getenv("CAT_POPUP")) lv_obj_clear_flag(pop_event, LV_OBJ_FLAG_HIDDEN);
     if (getenv("CAT_TOAST")) { toast(getenv("CAT_TOAST")); toast_until = 0; }  /* 0 = stays up */
 
+    /* Seed the ramp now so ui_backlight_pct() has the real answer before
+     * main() starts its fade, and so the two agree about where the panel
+     * is once it finishes. */
+    {
+        struct tm t0 = now_tm();
+        hue_load();
+        bl_want = bl_now = backlight_target(&t0);
+    }
+
     /* main.c fades up to this once the UI is built; applying it here would
      * light the panel before there was anything on it. */
-    printf("backlight target %d%%\n", backlight_pct);
+    printf("backlight target %d%% (slider %d%%)\n", bl_now, backlight_pct);
 }
 
-int ui_backlight_pct(void) { return backlight_pct; }
+/* What main() fades up to at boot. It must be the *effective* level, not
+ * the slider: the fade lands after the first tick, so returning the slider
+ * here overwrote auto mode's decision - and the ramp then saw its own
+ * bookkeeping as correct and never put it right. */
+int ui_backlight_pct(void) { return bl_now < 0 ? backlight_pct : bl_now; }
 
 void ui_tick(void)
 {

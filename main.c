@@ -129,7 +129,11 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
 /* --- panel backlight -------------------------------------------------
  * The Waveshare panel MCU exposes a standard sysfs backlight. Found by
  * glob, not hardcoded: the i2c address shows up in the device name. */
-#define BL_MIN_PCT 5        /* never fully dark - you'd lose sight of the slider */
+/* Never fully dark - the panel has to stay findable in an unlit hallway -
+ * but low enough that the deep-night level below is reachable. Everything
+ * the user can set directly still bottoms out at 5: the backlight slider's
+ * range starts there and dim_pct is validated to it. */
+#define BL_MIN_PCT 1
 
 static char bl_path[512];
 static int  bl_max;
